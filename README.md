@@ -6,6 +6,27 @@ Give a capable coding agent a brief, a point of view and a real render/review lo
 
 Inspired by LangChain’s [How We Built Our Design Agent](https://www.langchain.com/blog/design-agent). Original implementation; not a fork, affiliated service, or copy of their motion engine. See [provenance](docs/PROVENANCE.md).
 
+## Watch and shape the collection
+
+**[Open the motion gallery](https://x-motion.187.77.218.3.sslip.io)** — a lightweight Dokploy-hosted showcase, not a new agent application.
+
+Every published film has a permanent ID. Tell X in chat, for example: **“XM-0002 — keep the cobalt, slow the final reveal.”** The gallery's copy buttons prepare an ID or feedback template; they do not save feedback themselves.
+
+- `XM-0001` — **First Light**, 6s, original sound.
+- `XM-0002` — **Signal Weave**, 7s, silent.
+- `XM-0003` — **Weight of Type**, 7s, silent.
+
+All begin in **Review**, not approved. Improvements get new IDs linked to their parents. Discarded studies leave the deployed collection but remain in source history. See [the feedback workflow](docs/FEEDBACK.md) and [deployment](docs/DEPLOYMENT.md).
+
+```sh
+npm run catalog -- list
+npm run catalog -- validate
+npm run build:site
+npm run test:gallery
+```
+
+Small published MP4/poster snapshots in `gallery-media/` are deliberately tracked and hash-checked so deployment reproduces the exact reviewed video. Working frames and intermediate renders remain ignored. Private feedback must never be committed to this public repository.
+
 ## The skill
 
 Start with [`skills/x-motion/SKILL.md`](skills/x-motion/SKILL.md). It routes small refinements differently from new films, then loads only the craft references the job needs.
@@ -68,7 +89,7 @@ The renderer visits the file with `?render=1`. Disable preview playback in that 
 
 ## What this first release is—and is not
 
-The craft workflow is broader than the small bundled renderer. This release provides one portable skill, focused references, an original example, frame capture, MP4 export and tests. It does **not** reproduce LangChain’s Slack app, sandbox orchestration, reference-film library, temporal motion-blur engine or production approval service. Storyboard approval is a human workflow requirement, not a falsely advertised software lock.
+The craft workflow is broader than the small bundled renderer. This release provides one portable skill, focused references, three original studies, a public feedback-oriented gallery, frame capture, MP4 export and tests. It does **not** reproduce LangChain’s Slack app, sandbox orchestration, reference-film library, temporal motion-blur engine or production approval service. Storyboard approval is a human workflow requirement, not a falsely advertised software lock.
 
 Use another engine when the brief needs it: for example, a reviewed HyperFrames setup for editorial footage, or Three.js for genuine 3D. Read that engine’s current documentation and licenses first. Do not call Canvas shading “physically based 3D.”
 

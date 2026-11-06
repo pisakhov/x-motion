@@ -1,5 +1,8 @@
 name: Verify motion skill
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 permissions:
   contents: read
 jobs:
@@ -15,9 +18,19 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm test
+      - run: npm run build:site
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
+      - run: npm run test:gallery
       - run: npm run storyboard
+      - run: docker build -t x-motion-gallery:test .
+      - run: |
+          docker run -d --name x-motion-gallery-test --cap-drop ALL --security-opt no-new-privileges -p 127.0.0.1:8794:8080 x-motion-gallery:test
+          for attempt in $(seq 1 20); do curl -fsS http://127.0.0.1:8794/healthz && break; sleep 1; done
+          npm run test:http
+          GALLERY_URL=http://127.0.0.1:8794 npm run test:gallery
+      - if: always()
+        run: docker rm -f x-motion-gallery-test || true
       - uses: actions/upload-artifact@v4
         with:
           name: first-light-storyboard

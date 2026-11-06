@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "motions": [
+    {
+      "id": "XM-0001",
+      "title": "First Light",
+      "description": "An aperture opens into a restrained champagne-metal title. Original synthesized sound.",
+      "status": "review",
+      "duration": 6,
+      "width": 960,
+      "height": 540,
+      "video": "/media/XM-0001.mp4",
+      "poster": "/media/XM-0001.webp",
+      "videoSha256": "cefd02eb3a9f8100acd2790772817163a02177beb7abf298130677f456808e92",
+      "posterSha256": "02a5136571c7f9744d7fc089ecb984e8963cc7fc1967f7c7cba527aad091f2c0",
+      "parentId": null,
+      "createdAt": "2026-11-06",
+      "source": "examples/first-light/index.html",
+      "hasAudio": true
+    },
+    {
+      "id": "XM-0002",
+      "title": "Signal Weave",
+      "description": "Independent cobalt signal paths cohere into a woven field. Deliberately silent.",
+      "status": "review",
+      "duration": 7,
+      "width": 960,
+      "height": 540,
+      "video": "/media/XM-0002.mp4",
+      "poster": "/media/XM-0002.webp",
+      "videoSha256": "ec066321c52c2f53133880c8c0561624e3115d0aa4d27f3387c3b687daabe105",
+      "posterSha256": "f1f0d385dc8685f6d58b5edbb6dd2366d461b62c5d1899bdf85747fd1e409f50",
+      "parentId": null,
+      "createdAt": "2026-11-06",
+      "source": "examples/signal-weave/index.html",
+      "hasAudio": false
+    },
+    {
+      "id": "XM-0003",
+      "title": "Weight of Type",
+      "description": "Oversized typography acquires mass through compression, rhythm and release. Deliberately silent.",
+      "status": "review",
+      "duration": 7,
+      "width": 960,
+      "height": 540,
+      "video": "/media/XM-0003.mp4",
+      "poster": "/media/XM-0003.webp",
+      "videoSha256": "397d8fd728c69930ed2f8d6eeaff21de0dd4c53d3be2ef5e8265289fed4467c2",
+      "posterSha256": "f0bfb895bde4825541732708a105aeb3162011697f9457b5469b0c5a7e4918eb",
+      "parentId": null,
+      "createdAt": "2026-11-06",
+      "source": "examples/weight-of-type/index.html",
+      "hasAudio": false
+    }
+  ],
+  "feedback": []
+}

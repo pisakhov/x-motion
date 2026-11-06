@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signal Weave — X Motion</title><style>*{box-sizing:border-box}body{margin:0;background:#102dc5;display:grid;min-height:100vh;place-items:center}canvas{width:min(100vw,177.7778vh);height:auto;display:block}</style><canvas id="film" width="960" height="540" aria-label="Signal Weave: individual signals assemble into a woven field"></canvas><script>
+'use strict';
+const canvas=document.getElementById('film'),c=canvas.getContext('2d');
+window.motion={width:960,height:540,duration:7,fps:30};
+const clamp=x=>Math.max(0,Math.min(1,x)),p=(t,a,b)=>clamp((t-a)/(b-a)),ease=x=>x*x*(3-2*x),lerp=(a,b,u)=>a+(b-a)*u;
+const blue='#102dc5',ivory='#f3f0d9',accent='#ffbe78';
+function text(s,x,y,size=11,color=ivory){c.fillStyle=color;c.font=`${size>30?600:400} ${size}px ${size>30?'Arial, sans-serif':'monospace'}`;c.fillText(s,x,y)}
+function line(x,y,xx,yy,color,w=1){c.strokeStyle=color;c.lineWidth=w;c.beginPath();c.moveTo(x,y);c.lineTo(xx,yy);c.stroke()}
+function thread(i,u,t,vertical){const q=i/23,assembly=ease(p(t,.55+i*.023,2.5+i*.023));let x=-180+360*u,y=-180+360*q;const wave=Math.sin(u*Math.PI*4+q*Math.PI*2)*25*Math.sin(u*Math.PI);y+=wave*(1-assembly);const ridge=Math.sin(u*Math.PI)*Math.sin(q*Math.PI)*29; y+=ridge; x+=Math.sin(q*Math.PI)*Math.sin(u*Math.PI)*13; if(vertical)return {x:y,y:x};return{x,y};}
+function path(i,t,vertical,a=0,b=1){c.beginPath();for(let k=0;k<=90;k++){const v=thread(i,lerp(a,b,k/90),t,vertical);k?c.lineTo(v.x,v.y):c.moveTo(v.x,v.y)}c.stroke()}
+window.renderFrame=function(input){const t=Math.max(0,Math.min(7,Number.isFinite(input)?input:0));c.setTransform(1,0,0,1,0,0);c.globalAlpha=1;c.setLineDash([]);c.fillStyle=blue;c.fillRect(0,0,960,540);
+ const lock=ease(p(t,4.15,5.3)),reveal=ease(p(t,.2,3.2));
+ // Quiet registration furniture stays in screen space while the woven object resolves.
+ c.globalAlpha=.35;line(36,58,924,58,ivory);line(36,483,924,483,ivory);c.globalAlpha=1;
+ text('X / MOTION STUDIES',36,36);text('01 — SIGNAL WEAVE',735,36);text('24 WARP / 24 WEFT',36,509);text('ORDER FROM CONNECTION',730,509);
+ c.save();c.translate(lerp(480,700,lock),lerp(273,269,lock));const scale=lerp(1.85,1,reveal)*lerp(1,.89,lock);c.scale(scale,scale);
+ // A single traveling shuttle leads the sequential arrival of the warp and weft.
+ for(let i=0;i<24;i++){const entry=ease(p(t,.12+i*.038,1.2+i*.038));if(entry<=0)continue;c.strokeStyle=ivory;c.globalAlpha=lerp(.22,.85,i/23);c.lineWidth=i%6===0?1.6:.8;path(i,t,false,0,entry)}
+ for(let i=0;i<24;i++){const entry=ease(p(t,1.15+i*.031,2.4+i*.031));if(entry<=0)continue;c.globalAlpha=.68;c.strokeStyle=ivory;c.lineWidth=i%6===0?1.6:.8;path(i,t,true,0,entry)}
+ // Alternating short overpasses make actual woven junctions, not a luminous grid.
+ const woven=ease(p(t,2.15,3.35));c.globalAlpha=woven;
+ for(let i=1;i<23;i++)for(let j=1;j<23;j++){if((i+j)%2)continue;const v=thread(i,j/23,t,false);c.strokeStyle=blue;c.lineWidth=4;c.beginPath();c.moveTo(v.x-3,v.y);c.lineTo(v.x+3,v.y);c.stroke();c.strokeStyle=ivory;c.lineWidth=.85;c.beginPath();c.moveTo(v.x-3,v.y);c.lineTo(v.x+3,v.y);c.stroke()}
+ const pulseFade=p(t,.6,1)* (1-ease(p(t,5.25,5.8)));c.globalAlpha=pulseFade;c.strokeStyle=accent;c.lineWidth=2.5;
+ for(let k=0;k<3;k++){const u=clamp((t-1.8-k*.37)/2.9);if(u>0&&u<1){path(5+k*6,t,k===1,Math.max(0,u-.12),u);const v=thread(5+k*6,u,t,k===1);c.fillStyle=accent;c.fillRect(v.x-2.3,v.y-2.3,4.6,4.6)}}
+ c.globalAlpha=ease(p(t,3,3.7));c.strokeStyle=ivory;c.lineWidth=.7;for(const x of [-194,194])for(const y of [-194,194]){line(x,y,x-Math.sign(x)*12,y,ivory,.7);line(x,y,x,y-Math.sign(y)*12,ivory,.7)}
+ c.restore();c.globalAlpha=1;
+ const intro=(1-ease(p(t,1.9,2.3)));c.globalAlpha=intro;text('ONE THREAD.',49,428,24);text('A FIELD OF POSSIBILITY.',49,452,11);
+ c.globalAlpha=lock;c.save();c.beginPath();c.rect(40,104,470,320);c.clip();const y=lerp(30,0,lock);text('SIGNAL',45,228+y,76);text('WEAVE',45,302+y,76);line(48,333+y,364,333+y,ivory);text('INDEPENDENT LINES.',48,366+y,13);text('ONE COHERENT FIELD.',48,387+y,13);c.restore();c.globalAlpha=lock;text('FIG. 01 / INTERLACED SYSTEM',552,459,10);
+ c.globalAlpha=1;
+};window.renderFrame(0);
+if(new URLSearchParams(location.search).get('render')!=='1'&&!matchMedia('(prefers-reduced-motion: reduce)').matches){let start;function play(ms){start??=ms;window.renderFrame(((ms-start)/1000)%7);requestAnimationFrame(play)}requestAnimationFrame(play)}else if(new URLSearchParams(location.search).get('render')!=='1')window.renderFrame(7);
+</script></html>

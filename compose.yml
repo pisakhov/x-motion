@@ -1,0 +1,12 @@
+services:
+  gallery:
+    build:
+      context: .
+    restart: unless-stopped
+    expose:
+      - "8080"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m

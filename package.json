@@ -8,6 +8,10 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "check": "node scripts/check.mjs",
+    "build:site": "node scripts/build-site.mjs",
+    "catalog": "node scripts/catalog.mjs",
+    "test:gallery": "node scripts/test-gallery.mjs",
+    "test:http": "node scripts/test-http.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:browser": "RUN_RENDER_TESTS=1 node --test tests/render-browser.test.mjs",
     "storyboard": "node scripts/render.mjs examples/first-light/index.html --out renders/first-light-board",
