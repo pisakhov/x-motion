@@ -11,6 +11,7 @@ The site is static, public, read-only, and has no accounts, write API or databas
 - Server: Eve / Vero-Hostinger, `Up1ZyDPAGkVs97jftUgyq`
 - Source: public Git, `https://github.com/pisakhov/x-motion.git`, `main`, `./compose.yml`
 - Service: `gallery`, internal port `8080`, HTTPS via Traefik / Let's Encrypt.
+- Networking: reuse the existing attachable `dokploy-network` as Compose's external default. Eve's predefined bridge pools are exhausted; do not prune networks or create an unnecessary per-app subnet. For local checks use the documented `docker run` approach or deliberately provide a local network.
 - Automatic deployment is disabled. Explicitly deploy the reviewed merge; inspect state before retrying an ambiguous request.
 
 These are identifiers, not credentials. Use the host's preauthenticated Dokploy tooling privately; never print tokens or raw API service objects.
