@@ -1,0 +1,7 @@
+node_modules/
+renders/
+.artifacts/
+.DS_Store
+*.log
+.env
+.env.*
