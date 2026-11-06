@@ -1,0 +1,13 @@
+*
+!Dockerfile
+!deploy/
+!deploy/nginx.conf
+!scripts/
+!scripts/catalog.mjs
+!scripts/build-site.mjs
+!data/
+!data/catalog.json
+!site/
+!site/**
+!gallery-media/
+!gallery-media/**

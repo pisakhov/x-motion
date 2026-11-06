@@ -97,6 +97,8 @@ Use a fresh output directory for each revision. Inspect `manifest.json` and the 
 
 ## 5. Critique → revise → deliver
 
+When feedback names a published video ID, read [Gallery feedback](references/gallery-feedback.md). Resolve the exact film, preserve its identity and feedback, and publish revisions under new linked IDs. Carry forward scoped lessons, not every clip-specific instruction as a universal rule.
+
 Inspect rendered artifacts, not only source. View the storyboard for composition and play the video for rhythm; listen to the exported audio when present. If playback or listening is unavailable, state exactly what remains unreviewed.
 
 Use [Critique and delivery](references/critique-delivery.md) to separate measurable failures from subjective concerns. Address the highest-impact issue first. Limit the critique/revision loop to **three iterations per direction**. If the direction remains unresolved, stop, explain the competing concerns, and ask the human to choose or clarify before continuing. A technical pass is not aesthetic approval.
@@ -112,3 +114,4 @@ Load only the references needed for the current stage:
 - [Typography](references/typography.md): hierarchy, readable kinetic type, font handling.
 - [Audio](references/audio.md): cue maps, synchronization, silence, export checks.
 - [Critique and delivery](references/critique-delivery.md): evidence, bounded revision, handoff.
+- [Gallery feedback](references/gallery-feedback.md): immutable IDs, chat feedback, keep/improve/discard, and scoped learning.
