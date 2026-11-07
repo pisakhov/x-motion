@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Trusted local compositions only: network isolation is not a security sandbox.
-// Usage: node scripts/render.mjs composition/index.html --out renders/name [--times a,b] [--audio] [--video]
+// Usage: node scripts/render.mjs composition/index.html --out renders/name [--root dir] [--times a,b] [--audio] [--video]
 // Default: five storyboard PNGs + manifest. --audio exports the composition's score; --video adds frames, poster and MP4.
 import { createServer } from 'node:http';
 import { promises as fs } from 'node:fs';
@@ -9,18 +9,21 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 
-export const HELP = `Usage: node scripts/render.mjs <index.html> --out <directory> [--times a,b,c] [--audio] [--video]
+export const HELP = `Usage: node scripts/render.mjs <index.html> --out <directory> [--root <directory>] [--times a,b,c] [--audio] [--video]
 Default: five storyboard PNGs and a SHA-256 manifest.
 --times: capture these timestamps (seconds) instead of the five storyboard frames.
 --audio: also export sound.wav from window.renderAudio and record loudness in the manifest.
+--root: serve this directory instead of the composition's own, so a page can load shared
+        files such as ../reel/reel.js. The composition must be inside it.
 --video: also retain all frames, write poster.webp and encode H.264/yuv420p film.mp4.
          When window.renderAudio exists, its score is muxed as AAC 192 kb/s.
 Requires Playwright Chromium (npx playwright install chromium); audio and video require ffmpeg.
 Output directory must be absent or empty. Only trusted local compositions are supported.
 Composition API: window.motion = {width,height,duration,fps[,poster]}; window.renderFrame(seconds);
 optional window.renderAudio({sampleRate}) returning an AudioBuffer (e.g. from OfflineAudioContext).
-Math.random is replaced by a fixed-seed generator in render mode. Assets must be inside the
-composition directory; no remote requests.
+Math.random is replaced by a fixed-seed generator in render mode (in every frame, including
+iframes). Assets must be inside the composition directory (or --root); no remote requests.
+renderAudio may take up to max(30, 3 x duration) seconds.
 `;
 export const SAMPLE_RATE = 48000;
 
@@ -40,6 +43,10 @@ export function parseArgs(args) {
       const value = args[++i];
       if (!value || value.startsWith('-')) throw new Error('--out requires a directory');
       result.out = value;
+    } else if (arg === '--root' && !result.root) {
+      const value = args[++i];
+      if (!value || value.startsWith('-')) throw new Error('--root requires a directory');
+      result.root = value;
     } else if (!arg.startsWith('-') && !result.input) result.input = arg;
     else throw new Error(`Unknown or duplicate argument: ${arg}`);
   }
@@ -90,7 +97,7 @@ export async function resolveAsset(root, requestPath) {
 }
 
 export async function startServer(root) {
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.woff': 'font/woff', '.woff2': 'font/woff2', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.mp4': 'video/mp4' };
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.woff': 'font/woff', '.woff2': 'font/woff2', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac', '.vtt': 'text/vtt', '.mp4': 'video/mp4' };
   const server = createServer(async (req, res) => {
     try {
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }
@@ -150,26 +157,35 @@ export function parseLoudness(text) {
   return { integratedLufs: value(/I:\s+(-?[\d.]+|-inf) LUFS/), loudnessRangeLu: value(/LRA:\s+(-?[\d.]+) LU/), truePeakDbfs: value(/Peak:\s+(-?[\d.]+|-inf) dBFS/) };
 }
 
-async function evaluate(page, callback, argument) {
+async function evaluate(page, callback, argument, timeout = 30_000) {
   let timer;
   try {
     return await Promise.race([
       page.evaluate(callback, argument),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Composition evaluation timed out')), 30_000); }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Composition evaluation timed out')), timeout); }),
     ]);
   } finally { clearTimeout(timer); }
 }
 
-export async function render(options) {
-  const input = await fs.realpath(options.input);
+// Resolve the served directory and the composition's URL path within it (symlinks resolved first).
+export async function servedPage(inputPath, rootPath) {
+  const input = await fs.realpath(inputPath);
   if (!(await fs.stat(input)).isFile()) throw new Error('Input must be a file');
+  const root = rootPath ? await fs.realpath(rootPath) : path.dirname(input);
+  if (!(await fs.stat(root)).isDirectory()) throw new Error('--root must be a directory');
+  if (!inside(root, input) || root === input) throw new Error('The composition must be inside --root');
+  return { input, root, pagePath: path.relative(root, input).split(path.sep).map(encodeURIComponent).join('/') };
+}
+
+export async function render(options) {
+  const { input, root, pagePath } = await servedPage(options.input, options.root);
   const out = path.resolve(options.out);
   if (options.video || options.audio) await command('ffmpeg', ['-version']);
   const { chromium } = await import('playwright');
   let server, browser, unlock;
   try {
     unlock = await prepareOutput(out);
-    server = await startServer(path.dirname(input));
+    server = await startServer(root);
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: 'dark', reducedMotion: 'no-preference', serviceWorkers: 'block' });
     const failures = [];
@@ -189,7 +205,7 @@ export async function render(options) {
     page.on('pageerror', error => failures.push(error.message));
     page.on('response', response => { if (response.status() >= 400) failures.push(`Asset HTTP ${response.status()}: ${new URL(response.url()).pathname}`); });
     page.setDefaultTimeout(30_000);
-    await page.goto(`${server.origin}/${encodeURIComponent(path.basename(input))}?render=1`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto(`${server.origin}/${pagePath}?render=1`, { waitUntil: 'networkidle', timeout: 30_000 });
     const motion = validateMotion(await evaluate(page, () => window.motion));
     await page.setViewportSize({ width: motion.width, height: motion.height });
     await evaluate(page, async () => {
@@ -252,7 +268,7 @@ export async function render(options) {
         let binary = '';
         for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
         return { channels: channels.length, sourceFrames: buffer.length, peak, clipped, base64: btoa(binary) };
-      }, { sampleRate: SAMPLE_RATE, frames });
+      }, { sampleRate: SAMPLE_RATE, frames }, Math.max(30_000, Math.ceil(motion.duration * 3000)));
       const first = await renderPcm(), second = await renderPcm();
       if (first.base64 !== second.base64) throw new Error('Audio determinism check failed: renderAudio returned different samples on a second call');
       const wav = wavFile(Buffer.from(first.base64, 'base64'), first.channels, SAMPLE_RATE);

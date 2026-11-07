@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>One Breath · X Motion Sumi</title>
+<link rel="stylesheet" href="../reel/reel.css">
+</head><body>
+<script src="../orbit/kit.js"></script>
+<script src="../reel/reel.js"></script>
+<script>
+'use strict';
+// One Breath. A sixty-second narrated film cut from Bloom, Mist and Stroke: a drop of ink opens and
+// dissolves into mist, the mist becomes a range of mountains a crane crosses, and the paper clears for
+// a single enso and its seal. Ink washes across the first cut; the second clears through bare paper.
+// Render: node scripts/render.mjs examples/sumi/one-breath.html --root examples --out renders/one-breath --video
+const { lin, smooth } = Reel;
+const D = 60;
+
+const shots = [
+  { id: 'bloom', scene: 'bloom', keys: [[0, 0], [4.0, 0.6], [5.6, 1.0], [8.0, 2.0], [14.5, 6.0], [18.5, 8.4], [20.5, 8.85]] },
+  { id: 'mist', scene: 'mist', kind: 1, keys: [[18.0, 0.3], [22.0, 2.2], [36.5, 10.4], [38.6, 11.0]] },
+  { id: 'stroke', scene: 'stroke', kind: 2, keys: [[36.5, 0], [40.8, 1.15], [44.4, 3.25], [48.4, 5.0], [60.0, 7.0]] },
+];
+
+const COMPOSITE = `
+uniform float uFade;
+const vec3 PAPER = vec3(0.846, 0.800, 0.690);
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 q = (uv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
+  vec3 col;
+  if (uShots < 1.5) col = A(uv);
+  else if (uKind < 1.5) {
+    // ink wash: a wet front spreads from the centre through the paper fibres, carrying the next shot
+    float n = fbm(q * 2.6 + 3.1) * 0.75 + fbm(q * 9.0 - 1.7) * 0.25;
+    float reach = length(q * vec2(0.8, 1.0)) * 0.55 + n * 0.6;
+    float front = mix(-0.05, 1.25, smoothstep(0., 1., uP));
+    float m = smoothstep(reach - 0.07, reach + 0.07, front);
+    float rim = exp(-pow((front - reach) / 0.05, 2.)) * (1. - smoothstep(0.75, 1., uP));
+    col = mix(A(uv), B(uv), m) * (1. - 0.45 * rim);              // the wet edge darkens as it travels
+  } else {
+    // through paper: the outgoing image lifts off, bare paper breathes, the next one settles in
+    float k1 = smoothstep(0., 0.55, uP), k2 = smoothstep(0.45, 1., uP);
+    col = mix(mix(A(uv), PAPER, k1), B(uv), k2);
+  }
+  outColor = finish(mix(PAPER, col, uFade));
+}`;
+
+const uniforms = t => ({ uFade: smooth(lin(t, 0, 0.5)) * (1 - smooth(lin(t, 58.5, 59.9))) });
+
+const cards = [
+  { className: 'ink', html: '<div class="kicker">X Motion · Sumi</div><div class="title">One Breath</div>', at: [0.6, 1.9, 3.0, 4.0], rise: 10, lift: 6, blur: 8, track: [0.04, -0.02] },
+  { className: 'ink low', html: '<div class="title">One Breath</div><div class="sub">Bloom · Mist · Stroke</div>', at: [52.0, 53.6, 58.2, 59.4], rise: 10, blur: 6, track: [0.03, -0.02] },
+];
+
+// ------------------------------------------------------------------ score + sound
+// D minor pentatonic (D F G A C), plucked like a koto: sparse, with long silences between phrases.
+const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+async function score(S, FX, R) {
+  const hall = S.reverb(7.5, 61, { decay: 6.5, dark: 0.7 }, 0.6);
+  const fxRoom = FX.reverb(3.0, 67, { decay: 2.2, dark: 0.6 }, 0.38);
+  const at = R.at;
+  const pluck = [[1, 1, 0.9], [2.0, 0.45, 0.45], [3.01, 0.22, 0.25], [4.03, 0.1, 0.14], [5.98, 0.04, 0.08]];
+  const drop = at('bloom', 1.0), down = at('stroke', 1.15), lift = at('stroke', 3.25), seal = at('stroke', 5.0);
+  const note = (t, m, a, pan = 0) => S.bell({ t, f: hz(m), amp: a, pan, partials: pluck, attack: 0.003, send: hall, sendAmt: 0.85 });
+
+  // a held drone: the room tone of the paper, in and out with each section
+  const drone = (notes, t0, t1, peak, cut) => S.pad({
+    notes: notes.map(hz), amp: peak, send: hall, sendAmt: 0.8, voices: 2, detune: 4, q: 0.3,
+    env: [[t0, 0], [t0 + 4, 1], [t1 - 3, 1], [t1, 0]], cutoff: cut,
+  });
+  drone([38, 45], 1.0, 21.0, 0.05, [[1, 300], [12, 700], [21, 350]]);
+  drone([38, 45, 50], 18.5, 39.0, 0.045, [[18.5, 400], [30, 800], [39, 300]]);
+  drone([38, 45, 53], 38.0, 60.0, 0.045, [[38, 300], [seal, 900], [60, 400]]);
+
+  // phrases: a few notes per section, answered by silence
+  [[drop + 0.05, 62, 0.08], [drop + 2.6, 69, 0.05], [drop + 3.4, 72, 0.045], [12.2, 67, 0.04], [13.0, 65, 0.04], [14.6, 62, 0.05], [16.8, 74, 0.035], [18.0, 69, 0.03]]
+    .forEach(([t, m, a], i) => note(t, m, a, (i % 3 - 1) * 0.3));
+  // mist: the crane enters on A, its flight a slow descending line
+  const crane = at('mist', 2.6);
+  [[19.2, 50, 0.07], [crane, 69, 0.05], [crane + 0.8, 76, 0.04], [26.6, 77, 0.035], [27.4, 76, 0.035], [31.8, 72, 0.04], [33.2, 74, 0.04], [34.0, 69, 0.045], [35.2, 62, 0.05]]
+    .forEach(([t, m, a], i) => note(t, m, a, 0.5 - i * 0.12));
+  // stroke: silence holds while the brush travels; one note as it lifts, the seal lands on the tonic
+  [[37.2, 74, 0.035], [38.2, 69, 0.03], [lift + 0.1, 69, 0.05], [seal, 50, 0.09], [seal + 0.02, 62, 0.06], [seal + 1.4, 69, 0.04], [seal + 2.2, 72, 0.035], [53.0, 74, 0.04], [54.2, 69, 0.04], [56.0, 62, 0.06]]
+    .forEach(([t, m, a], i) => note(t, m, a, (i % 3 - 1) * 0.25));
+
+  // ---- sound effects
+  // wind and paper: a soft air bed that thins when the brush comes down
+  FX.noise({ t0: 0, t1: 60, seed: 71, color: 'pink', type: 'bandpass', freq: [[0, 500], [22, 900], [36, 700], [40, 400], [60, 400]], q: 0.5, gain: [[0, 0], [3, 0.05], [18, 0.04], [24, 0.09], [34, 0.08], [39.5, 0.025], [57, 0.025], [60, 0]], pan: [[0, -0.2], [30, 0.3], [60, 0]] });
+  // the drop: a tiny falling tone, then the touch on wet paper
+  const dg = FX.ctx.createGain(); FX.curve(dg.gain, [[drop - 0.5, 0], [drop - 0.3, 0.01], [drop, 0.014], [drop + 0.01, 0]]); dg.connect(FX.master);
+  const dob = FX.osc('sine', hz(98), drop - 0.5, drop + 0.02, dg); FX.automate(dob.frequency, [[drop - 0.5, hz(98)], [drop, hz(91), 'e']]);
+  const tg = FX.ctx.createGain(); FX.curve(tg.gain, [[drop, 0], [drop + 0.004, 0.35], [drop + 0.25, 0]]); tg.connect(FX.master); tg.connect(fxRoom);
+  const to = FX.osc('sine', 210, drop, drop + 0.3, tg); FX.automate(to.frequency, [[drop, 210], [drop + 0.1, 95, 'e']]);
+  // the bloom spreading, then letting go into mist
+  const b0 = at('bloom', 2.0), b1 = at('bloom', 6.0), b2 = at('bloom', 8.4);
+  FX.noise({ t0: b0, t1: b2, seed: 73, color: 'brown', type: 'lowpass', freq: [[b0, 300], [b1, 600], [b2, 250]], q: 0.7, gain: [[b0, 0], [b1, 0.18], [b2, 0]], send: fxRoom });
+  // the wash: a wet front across the paper
+  FX.noise({ t0: 17.6, t1: 21.0, seed: 79, color: 'pink', type: 'bandpass', freq: [[17.6, 700], [20.5, 2200]], q: 0.8, gain: [[17.6, 0], [19.6, 0.12], [21.0, 0]], pan: [[17.6, -0.3], [21, 0.3]], send: hall, sendAmt: 0.4 });
+  // the crane: soft wingbeats in the far sky (period 1.3 s of film time), panned right to left
+  for (let l = 2.6; l < 10.4; l += 1.3) {
+    const t = at('mist', l), pan = 0.8 - 1.6 * (l - 2.6) / 7.8;
+    FX.noise({ t0: t, t1: t + 0.5, seed: 83 + Math.round(l * 10), color: 'pink', type: 'bandpass', freq: [[t, 1100]], q: 1.1, gain: [[t, 0], [t + 0.12, 0.05], [t + 0.5, 0]], pan: [[t, pan]] });
+  }
+  // the brush: bristles loading on paper, dragging, and lifting into a dry flick
+  FX.noise({ t0: down - 0.05, t1: lift + 0.2, seed: 89, color: 'pink', type: 'bandpass', freq: [[down, 2200], [lift - 0.6, 3200], [lift, 5200]], q: 0.7, gain: [[down - 0.05, 0], [down + 0.1, 0.22], [(down + lift) / 2, 0.16], [lift - 0.4, 0.1], [lift, 0.05], [lift + 0.2, 0]], pan: [[down, -0.25], [(down + lift) / 2, 0.3], [lift, -0.1]], send: fxRoom });
+  FX.noise({ t0: down - 0.05, t1: lift, seed: 97, color: 'brown', type: 'lowpass', freq: [[down, 380]], q: 0.6, gain: [[down - 0.05, 0], [down + 0.08, 0.3], [lift, 0]] });
+  // the seal: a firm press of stone on paper
+  FX.noise({ t0: seal - 0.02, t1: seal + 0.3, seed: 101, color: 'brown', type: 'lowpass', freq: [[seal, 500], [seal + 0.3, 120]], q: 0.9, gain: [[seal - 0.02, 0], [seal, 0.6], [seal + 0.3, 0]], send: fxRoom });
+}
+
+Reel.film({
+  duration: D, poster: 49.0,
+  scenes: { bloom: 'bloom.html', mist: 'mist.html', stroke: 'stroke.html' },
+  shots, composite: COMPOSITE, uniforms, cards,
+  fonts: ['300 112px Geist', '500 22px Geist', '400 26px Geist', '350 64px Geist'],
+  voice: { audio: 'voice/one-breath.flac', cues: 'voice/one-breath.cues.json' },
+  mix: { musicDuckDb: -8, fxDuckDb: -4, roomWet: 0.1 },
+  score,
+});
+</script>
+</body></html>

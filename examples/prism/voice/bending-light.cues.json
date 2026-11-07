@@ -1,0 +1,67 @@
+{
+  "sampleRate": 48000,
+  "duration": 60,
+  "lineLufs": -20.0,
+  "peakDbfs": -2.0,
+  "voice": "bf_emma",
+  "lang": "en-gb",
+  "model": "Kokoro-82M v1.0 (Apache-2.0) via kokoro-onnx (MIT)",
+  "files": {
+    "kokoro-v1.0.onnx": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
+    "voices-v1.0.bin": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+  },
+  "packages": {
+    "kokoro-onnx": "0.6.1",
+    "onnxruntime": "1.31.1",
+    "numpy": "2.5.4",
+    "soundfile": "0.14.0"
+  },
+  "audioSha256": "343befce2f25e45b0654fbd1d3d1709ccee59d5a97c2f1484bce334205709576",
+  "lines": [
+    {
+      "start": 4.6,
+      "end": 6.7573,
+      "text": "White light looks simple. It isn't."
+    },
+    {
+      "start": 7.4,
+      "end": 12.2722,
+      "text": "Send it through glass, and it comes apart: every colour it was carrying, side by side."
+    },
+    {
+      "start": 13.0,
+      "end": 15.8962,
+      "text": "Red bends the least. Violet bends the most."
+    },
+    {
+      "start": 22.6,
+      "end": 23.9635,
+      "text": "Water does it too."
+    },
+    {
+      "start": 24.6,
+      "end": 27.9856,
+      "text": "A surface moves, and light gathers into bright, living lines."
+    },
+    {
+      "start": 29.4,
+      "end": 33.2373,
+      "text": "One drop, and the pattern breaks, rings out, and knits itself back together."
+    },
+    {
+      "start": 41.8,
+      "end": 44.1241,
+      "text": "Glass can gather light, as well as split it."
+    },
+    {
+      "start": 45.0,
+      "end": 49.3355,
+      "text": "A sphere becomes a lens, and the light it gathers burns to a single point."
+    },
+    {
+      "start": 51.0,
+      "end": 54.6197,
+      "text": "Even now, the lens in your eye is bending light, to show you this."
+    }
+  ]
+}

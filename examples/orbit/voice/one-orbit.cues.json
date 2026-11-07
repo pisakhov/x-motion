@@ -1,0 +1,67 @@
+{
+  "sampleRate": 48000,
+  "duration": 60,
+  "lineLufs": -20.0,
+  "peakDbfs": -2.0,
+  "voice": "af_heart",
+  "lang": "en-us",
+  "model": "Kokoro-82M v1.0 (Apache-2.0) via kokoro-onnx (MIT)",
+  "files": {
+    "kokoro-v1.0.onnx": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
+    "voices-v1.0.bin": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+  },
+  "packages": {
+    "kokoro-onnx": "0.6.1",
+    "onnxruntime": "1.31.1",
+    "numpy": "2.5.4",
+    "soundfile": "0.14.0"
+  },
+  "audioSha256": "ff8fc5ccc15a2f417454197c4cd916c812e95d7065d430b3a33ed67d3aee5027",
+  "lines": [
+    {
+      "start": 4.7,
+      "end": 6.4204,
+      "text": "Every orbit begins with a door."
+    },
+    {
+      "start": 7.0,
+      "end": 8.9506,
+      "text": "Open it, and the ground lets go."
+    },
+    {
+      "start": 10.3,
+      "end": 14.77,
+      "text": "Then the world rises to meet you. Blue, and impossibly thin at the edge."
+    },
+    {
+      "start": 18.4,
+      "end": 22.3071,
+      "text": "Ninety minutes to circle it. Sixteen sunrises in a single day."
+    },
+    {
+      "start": 24.2,
+      "end": 28.995,
+      "text": "On the night side, cities glow like embers. Every light is someone, still awake."
+    },
+    {
+      "start": 35.2,
+      "end": 38.5954,
+      "text": "And once in a long while, the moon steps in front of the sun."
+    },
+    {
+      "start": 41.2,
+      "end": 44.7763,
+      "text": "The day goes out, and the sun shows what it hides: its crown."
+    },
+    {
+      "start": 52.9,
+      "end": 55.3512,
+      "text": "Then the light comes back. It always does."
+    },
+    {
+      "start": 56.0,
+      "end": 57.619,
+      "text": "One orbit. Then another."
+    }
+  ]
+}

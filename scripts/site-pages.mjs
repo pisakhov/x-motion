@@ -105,7 +105,7 @@ export function filmPage(film, theme, siblings) {
     description: film.description,
     body: `<article class="film">
   <div class="stage">
-    <video id="player" controls playsinline preload="metadata" poster="${film.poster}" src="${film.video}" width="${film.width}" height="${film.height}"></video>
+    <video id="player" controls playsinline preload="metadata" poster="${film.poster}" src="${film.video}" width="${film.width}" height="${film.height}">${film.captions ? `<track kind="captions" src="${film.captions}" srclang="en" label="English">` : ''}</video>
   </div>
   <aside class="panel">
     <a class="back" href="/${theme.slug}/">${e(theme.title)}</a>
@@ -119,11 +119,15 @@ export function filmPage(film, theme, siblings) {
       <h2 id="skills-label">Skills</h2>
       <ul class="chips">${film.skills.map(skill => `<li><a class="chip" href="/skills/${skill}/">${e(skill)}</a></li>`).join('')}</ul>
     </section>
-    <dl class="facts">
+    ${film.transcript ? `<details class="block transcript">
+      <summary><h2>Transcript</h2></summary>
+      ${film.transcript.map(line => `<p>${e(line)}</p>`).join('\n      ')}
+    </details>
+    ` : ''}<dl class="facts">
       <div><dt>ID</dt><dd><button type="button" class="id" data-copy-text="${film.id}" aria-label="Copy ID ${film.id}">${film.id}</button></dd></div>
       <div><dt>Length</dt><dd>${formatSeconds(film.duration)}</dd></div>
       <div><dt>Format</dt><dd>${film.width}×${film.height}</dd></div>
-      <div><dt>Sound</dt><dd>${film.hasAudio ? 'Original score' : 'Silent'}</dd></div>
+      <div><dt>Sound</dt><dd>${film.hasAudio ? (film.captions ? 'Original score and narration' : 'Original score') : 'Silent'}</dd></div>
       <div><dt>Model</dt><dd>${e(modelName(film.model))}</dd></div>
       <div><dt>Source</dt><dd><a href="${SITE.repo}/blob/main/${film.source}" rel="noopener noreferrer">${e(film.source.split('/').slice(-2).join('/'))}</a></dd></div>
     </dl>

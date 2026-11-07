@@ -67,6 +67,13 @@ export function validateCatalog(catalog) {
     text(motion.model, `${motion.id} model`);
     requireThat(Array.isArray(motion.skills) && motion.skills.length > 0 && motion.skills.length <= 8 && motion.skills.every(skill => typeof skill === 'string' && SLUG.test(skill)) && new Set(motion.skills).size === motion.skills.length, `${motion.id}: skills must be unique kebab-case names`);
     requireThat(motion.preview === `/media/${motion.id}-preview.mp4` && typeof motion.previewSha256 === 'string' && SHA.test(motion.previewSha256), `${motion.id}: preview path must match ID with a SHA-256 digest`);
+    // Narrated films carry WebVTT captions beside the film and the spoken lines as a transcript.
+    if (motion.captions !== undefined) {
+      requireThat(motion.captions === `/media/${motion.id}.vtt` && typeof motion.captionsSha256 === 'string' && SHA.test(motion.captionsSha256), `${motion.id}: captions path must match ID with a SHA-256 digest`);
+      requireThat(Array.isArray(motion.transcript) && motion.transcript.length > 0 && motion.transcript.length <= 200 && motion.transcript.every(line => typeof line === 'string' && line.trim() === line && line.length > 0 && line.length <= 500), `${motion.id}: transcript must list the captioned lines`);
+    } else {
+      requireThat(motion.captionsSha256 === undefined && motion.transcript === undefined, `${motion.id}: transcript and captions digest need captions`);
+    }
   }
   for (const motion of ids.values()) {
     const seen = new Set([motion.id]);
@@ -107,6 +114,7 @@ export async function validateMedia(root, motions, directory = path.join(root, '
 export function mediaFiles(motion) {
   const files = [[`${motion.id}.mp4`, 250 * 1024 * 1024, motion.videoSha256], [`${motion.id}.webp`, 20 * 1024 * 1024, motion.posterSha256]];
   if (motion.preview) files.push([`${motion.id}-preview.mp4`, 50 * 1024 * 1024, motion.previewSha256]);
+  if (motion.captions) files.push([`${motion.id}.vtt`, 1024 * 1024, motion.captionsSha256]);
   return files;
 }
 
@@ -153,7 +161,23 @@ function run(executable, args) {
   });
 }
 
-const SPEC_FIELDS = ['source', 'theme', 'slug', 'title', 'description', 'prompt', 'skills', 'model', 'parentId'];
+const SPEC_FIELDS = ['source', 'theme', 'slug', 'title', 'description', 'prompt', 'skills', 'model', 'parentId', 'captions'];
+
+// Cue text from a WebVTT file, one entry per cue (wrapped rows joined). Rejects anything that is not WebVTT.
+export function vttTranscript(source) {
+  const blocks = source.replace(/\r\n?/g, '\n').split(/\n{2,}/);
+  requireThat(/^WEBVTT(?:[ \t].*)?$/.test(blocks[0].split('\n')[0]), 'Captions must be a WebVTT file');
+  const lines = [];
+  for (const block of blocks.slice(1)) {
+    const rows = block.split('\n').filter(Boolean);
+    const timing = rows.findIndex(row => /^\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}/.test(row));
+    if (timing < 0) continue;
+    const text = rows.slice(timing + 1).join(' ').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    if (text) lines.push(text);
+  }
+  requireThat(lines.length > 0, 'Captions contain no cues');
+  return lines;
+}
 
 // Publish a verified --video render under the next permanent ID. Media is copied, never overwritten.
 export async function addMotion(root, renderDirectory, spec, today = new Date().toISOString().slice(0, 10)) {
@@ -167,17 +191,29 @@ export async function addMotion(root, renderDirectory, spec, today = new Date().
   for (const name of ['film.mp4', 'poster.webp']) requireThat(await sha256File(path.join(renderDir, name)) === recorded[name], `${name} does not match the render manifest`);
   const sourceFile = path.join(root, spec.source);
   requireThat((await lstat(sourceFile)).isFile(), 'spec.source must exist');
+  let captionsFile = null, transcript = null;
+  if (spec.captions !== undefined) {
+    requireThat(typeof spec.captions === 'string' && /^examples\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.vtt$/.test(spec.captions), 'spec.captions must be a .vtt path under examples/');
+    captionsFile = path.join(root, spec.captions);
+    const stat = await lstat(captionsFile).catch(() => null);
+    requireThat(stat?.isFile() === true, 'spec.captions must be an existing regular file');
+    transcript = vttTranscript(await readFile(captionsFile, 'utf8'));
+  }
   return writeCatalogLocked(root, async catalog => {
     const next = Math.max(0, ...catalog.motions.map(item => Number(item.id.slice(3)))) + 1;
     const id = `XM-${String(next).padStart(4, '0')}`;
     const media = path.join(root, 'gallery-media');
-    const film = path.join(media, `${id}.mp4`), poster = path.join(media, `${id}.webp`), preview = path.join(media, `${id}-preview.mp4`);
+    const film = path.join(media, `${id}.mp4`), poster = path.join(media, `${id}.webp`), preview = path.join(media, `${id}-preview.mp4`), captions = path.join(media, `${id}.vtt`);
     const { motion } = manifest;
     const created = [];
     try {
       for (const [from, to] of [['film.mp4', film], ['poster.webp', poster]]) {
         await copyFile(path.join(renderDir, from), to, 1); // COPYFILE_EXCL: never overwrite permanent-ID media
         created.push(to);
+      }
+      if (captionsFile) {
+        await copyFile(captionsFile, captions, 1);
+        created.push(captions);
       }
       // Muted, smaller loop for autoplaying theme doors and grid tiles. Refuse (and never delete) a stray existing file.
       await lstat(preview).then(() => { throw new Error(`${path.basename(preview)} already exists`); }, error => { if (error.code !== 'ENOENT') throw error; });
@@ -190,6 +226,7 @@ export async function addMotion(root, renderDirectory, spec, today = new Date().
         videoSha256: await sha256File(film), posterSha256: await sha256File(poster), previewSha256: await sha256File(preview),
         parentId: spec.parentId ?? null, createdAt: today, source: spec.source, hasAudio: manifest.audio !== null && manifest.audio !== undefined,
         theme: spec.theme, slug: spec.slug, prompt: spec.prompt, skills: spec.skills, model: spec.model,
+        ...(captionsFile ? { captions: `/media/${id}.vtt`, captionsSha256: await sha256File(captions), transcript } : {}),
       };
       catalog.motions.push(record);
       validateCatalog(catalog);

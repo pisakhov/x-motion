@@ -88,10 +88,15 @@ export async function check(root = path.resolve(path.dirname(fileURLToPath(impor
   const examples = [];
   for (const relative of await htmlFiles(path.join(root, 'examples'))) {
     const html = await fs.readFile(path.join(root, 'examples', relative), 'utf8');
-    // A composition defines the contract inline, or through a sibling kit script loaded by relative path.
-    const kits = [...html.matchAll(/<script\s+src="([A-Za-z0-9_-]+\.js)"><\/script>/g)].map(match => match[1]);
+    // A composition defines the contract inline, or through kit scripts loaded by relative path: a sibling
+    // (kit.js) or a shared one elsewhere under examples/ (../reel/reel.js). Paths may not leave examples/.
+    const kits = [...html.matchAll(/<script\s+src="((?:\.\.\/)?(?:[A-Za-z0-9_-]+\/)?[A-Za-z0-9_-]+\.js)"><\/script>/g)].map(match => match[1]);
     let contract = html;
-    for (const kit of kits) contract += await fs.readFile(path.join(root, 'examples', path.dirname(relative), kit), 'utf8');
+    for (const kit of kits) {
+      const file = path.join(root, 'examples', path.dirname(relative), kit);
+      if (path.relative(path.join(root, 'examples'), file).startsWith('..')) throw new Error(`examples/${relative}: script ${kit} is outside examples/`);
+      contract += await fs.readFile(file, 'utf8');
+    }
     if (!/window\.renderFrame\s*=/.test(contract)) throw new Error(`examples/${relative}: missing window.renderFrame assignment`);
     if (!/window\.motion\s*=/.test(contract)) throw new Error(`examples/${relative}: missing window.motion metadata`);
     // Fully literal metadata is validated here; computed metadata is validated by the renderer at run time.

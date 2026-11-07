@@ -317,6 +317,46 @@
         "x-motion-sumi"
       ],
       "model": "claude-opus-5-5"
+    },
+    {
+      "id": "XM-0013",
+      "title": "One Orbit",
+      "description": "A narrated minute: the door opens, the planet rises, a day of sixteen sunrises passes and the moon covers the sun.",
+      "status": "review",
+      "duration": 60,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0013.mp4",
+      "poster": "/media/XM-0013.webp",
+      "preview": "/media/XM-0013-preview.mp4",
+      "videoSha256": "8ead306090ea4475cbaf06d391990db1405d02835de7a314b549ac52f00b031a",
+      "posterSha256": "b10f834c549899b4fa4b0f590ecff29ef8ce190405fdeaa45668729adc8a0a38",
+      "previewSha256": "462239b42ba09075f568ef2586f29ffefc542a168001d3eb4cc51cea9eba5b79",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/orbit/one-orbit.html",
+      "hasAudio": true,
+      "theme": "orbit",
+      "slug": "one-orbit",
+      "prompt": "A sixty-second narrated film cut from Passage, Terminator and Eclipse. The seal opens and the camera falls toward the planet, sunrise breaks over the limb, the terminator sweeps through sixteen sunrises in a single day, then the moon covers the sun, and the diamond ring returns the light. Long narration, an original score, sound effects locked to picture, a perfect mix and designed transitions between shots. 1920×1080.",
+      "skills": [
+        "x-motion",
+        "x-motion-orbit"
+      ],
+      "model": "claude-opus-5-5",
+      "captions": "/media/XM-0013.vtt",
+      "captionsSha256": "87930d14971fc561422f94f1f478446f6f2f45555815e2702d014d9d3ebcfd33",
+      "transcript": [
+        "Every orbit begins with a door.",
+        "Open it, and the ground lets go.",
+        "Then the world rises to meet you. Blue, and impossibly thin at the edge.",
+        "Ninety minutes to circle it. Sixteen sunrises in a single day.",
+        "On the night side, cities glow like embers. Every light is someone, still awake.",
+        "And once in a long while, the moon steps in front of the sun.",
+        "The day goes out, and the sun shows what it hides: its crown.",
+        "Then the light comes back. It always does.",
+        "One orbit. Then another."
+      ]
     }
   ],
   "feedback": [

@@ -1,0 +1,18 @@
+{
+  "title": "One Orbit",
+  "voice": "af_heart",
+  "lang": "en-us",
+  "speed": 0.9,
+  "duration": 60,
+  "lines": [
+    { "at": 4.7, "text": "Every orbit begins with a door." },
+    { "at": 7.0, "text": "Open it, and the ground lets go." },
+    { "at": 10.3, "text": "Then the world rises to meet you. Blue, and impossibly thin at the edge." },
+    { "at": 18.4, "text": "Ninety minutes to circle it. Sixteen sunrises in a single day." },
+    { "at": 24.2, "text": "On the night side, cities glow like embers. Every light is someone, still awake." },
+    { "at": 35.2, "text": "And once in a long while, the moon steps in front of the sun." },
+    { "at": 41.2, "text": "The day goes out, and the sun shows what it hides: its crown." },
+    { "at": 52.9, "text": "Then the light comes back. It always does." },
+    { "at": 56.0, "text": "One orbit. Then another." }
+  ]
+}

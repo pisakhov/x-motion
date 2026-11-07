@@ -1,0 +1,15 @@
+/* X Motion Reel: frame, compositor canvas and title cards. Geist (SIL OFL 1.1, see fonts/OFL.txt). */
+@font-face { font-family: Geist; src: url(fonts/geist.woff2) format("woff2"); font-weight: 100 900; font-display: block; }
+
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+.reel-canvas { position: absolute; inset: 0; width: 1920px; height: 1080px; display: block; }
+.reel-cards { position: absolute; inset: 0; pointer-events: none; font-family: Geist, system-ui, sans-serif; color: #f4f2ee;
+  -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; font-kerning: normal; }
+.reel-card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; will-change: opacity, transform, filter; visibility: hidden; }
+.reel-card .kicker { font-size: 22px; font-weight: 500; letter-spacing: 0.32em; text-transform: uppercase; opacity: 0.62; margin-bottom: 28px; }
+.reel-card .title { font-size: 112px; font-weight: 300; letter-spacing: -0.025em; line-height: 1; }
+.reel-card .sub { font-size: 26px; font-weight: 400; letter-spacing: 0.04em; opacity: 0.7; margin-top: 30px; }
+.reel-card.low { justify-content: flex-end; padding-bottom: 120px; box-sizing: border-box; }
+.reel-card.low .title { font-size: 64px; font-weight: 350; }
+.reel-card.ink { color: #1d1b18; }

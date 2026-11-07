@@ -258,13 +258,14 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-
     try { await build(); } finally { AudioNode.prototype.connect = raw; }
     for (const [dest, e] of fan) raw.call(e.tip, dest);
   }
-  function studio(ctx, D) {
+  // `out` lets a caller (examples/reel/reel.js) route a studio into its own bus; films use the default.
+  function studio(ctx, D, out = ctx.destination) {
     const sr = ctx.sampleRate;
     const master = ctx.createGain();
     // The 24 Hz high-pass and bus compression run in finalize() (plain JS, bit-exact). In headless
     // Chromium a stereo signal through a master BiquadFilterNode or DynamicsCompressorNode rendered
     // slightly differently on repeat runs, so the master bus stays node-free.
-    master.connect(ctx.destination);
+    master.connect(out);
 
     const cache = new Map();
     function noiseBuf(seconds, seed, color = 'white', channels = 1) {
@@ -486,5 +487,5 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-
     return buf;
   }
 
-  window.OrbitKit = { TAU, clamp, lin, smooth, smoother, mix, V, mulberry32, GLSL, ATMO, film, studio, finalize, loudness, truePeak };
+  window.OrbitKit = { TAU, clamp, lin, smooth, smoother, mix, V, mulberry32, GLSL, ATMO, film, studio, finalize, loudness, truePeak, deterministicGraph, highpass };
 })();

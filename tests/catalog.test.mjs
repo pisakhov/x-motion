@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { addMotion, main, readCatalog, recordFeedback, sha256File, validateCatalog, validateMedia } from '../scripts/catalog.mjs';
+import { addMotion, main, vttTranscript, readCatalog, recordFeedback, sha256File, validateCatalog, validateMedia } from '../scripts/catalog.mjs';
 import { buildSite } from '../scripts/build-site.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -270,4 +270,42 @@ test('add publishes a verified render under the next ID without overwriting medi
   await assert.rejects(addMotion(root, render, { ...spec, slug: 'other' }), /does not match the render manifest/);
   assert.equal(await readFile(path.join(root, 'data/catalog.json'), 'utf8'), before);
   assert.deepEqual((await readdir(path.join(root, 'gallery-media'))).sort(), ['XM-0001-preview.mp4', 'XM-0001.mp4', 'XM-0001.webp', 'XM-0002-preview.mp4', 'XM-0002.mp4', 'XM-0002.webp']);
+});
+
+const VTT = 'WEBVTT\n\n1\n00:00:00.500 --> 00:00:02.000\nEvery orbit begins\nwith a door.\n\n2\n00:00:02.400 --> 00:00:04.000\nOne orbit. <i>Then</i> another.\n';
+test('captions validate with the film ID, digest and transcript', () => {
+  const narrated = motion('XM-0001', { captions: '/media/XM-0001.vtt', captionsSha256: digest(VTT), transcript: ['Every orbit begins with a door.'] });
+  assert.doesNotThrow(() => validateCatalog(catalogOf([narrated])));
+  for (const change of [
+    { captions: '/media/XM-0002.vtt' }, { captions: '/media/../x.vtt' }, { captionsSha256: 'abc' }, { captionsSha256: undefined },
+    { transcript: [] }, { transcript: [' padded '] }, { transcript: 'text' }, { transcript: undefined },
+  ]) assert.throws(() => validateCatalog(catalogOf([{ ...narrated, ...change }])), JSON.stringify(change));
+  assert.throws(() => validateCatalog(catalogOf([motion('XM-0001', { transcript: ['Orphan line.'] })])), /need captions/);
+  assert.deepEqual(vttTranscript(VTT), ['Every orbit begins with a door.', 'One orbit. Then another.']);
+  for (const bad of ['', 'WEBVTTX\n\n', '<b>not vtt</b>', 'WEBVTT\n\nNOTE only a note\n']) assert.throws(() => vttTranscript(bad), JSON.stringify(bad));
+});
+
+test('add copies captions beside the film and the page carries a track and transcript', { skip: !hasFfmpeg && 'ffmpeg unavailable' }, async t => {
+  const root = await fixture(t);
+  const render = path.join(root, 'render');
+  await mkdir(render);
+  const film = path.join(render, 'film.mp4'), poster = path.join(render, 'poster.webp');
+  assert.equal(spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=320x180:d=1:r=30', '-pix_fmt', 'yuv420p', film]).status, 0);
+  await writeFile(poster, 'poster bytes');
+  await writeFile(path.join(render, 'manifest.json'), JSON.stringify({ mode: 'video', composition: 'a.html', determinismCheck: { passed: true }, audio: { lufs: -18 }, motion: { width: 320, height: 180, duration: 1, fps: 30 },
+    files: [{ file: 'film.mp4', sha256: await sha256File(film) }, { file: 'poster.webp', sha256: await sha256File(poster) }] }));
+  await writeFile(path.join(root, 'examples/demo/a.vtt'), VTT);
+  const spec = { source: 'examples/demo/a.html', theme: 'demo', slug: 'narrated', title: 'Narrated', description: 'With a voice.', prompt: 'Speak.', skills: ['x-motion', 'x-motion-demo'], model: 'claude-opus-5-5' };
+  for (const captions of ['../a.vtt', 'examples/demo/a.html', 'examples/demo/missing.vtt']) await assert.rejects(addMotion(root, render, { ...spec, captions }), /captions/);
+  const record = await addMotion(root, render, { ...spec, captions: 'examples/demo/a.vtt' }, '2026-11-07');
+  assert.equal(record.captions, '/media/XM-0002.vtt');
+  assert.equal(record.captionsSha256, digest(VTT));
+  assert.deepEqual(record.transcript, ['Every orbit begins with a door.', 'One orbit. Then another.']);
+  await buildSite(root);
+  const page = await readFile(path.join(root, 'dist/m/XM-0002/index.html'), 'utf8');
+  assert.match(page, /<track kind="captions" src="\/media\/XM-0002\.vtt" srclang="en" label="English">/);
+  assert.match(page, /Original score and narration/);
+  assert.match(page, /<p>One orbit\. Then another\.<\/p>/);
+  assert.equal(await readFile(path.join(root, 'dist/media/XM-0002.vtt'), 'utf8'), VTT);
+  assert.doesNotMatch(await readFile(path.join(root, 'dist/m/XM-0001/index.html'), 'utf8'), /<track|Transcript/);
 });

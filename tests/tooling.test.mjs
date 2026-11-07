@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, validateMotion, frameTimes, resolveAsset, startServer, prepareOutput, wavFile, parseLoudness } from '../scripts/render.mjs';
+import { parseArgs, validateMotion, frameTimes, resolveAsset, servedPage, startServer, prepareOutput, wavFile, parseLoudness } from '../scripts/render.mjs';
 import { validateFrontmatter, localReferences, extractMotion, check } from '../scripts/check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -25,6 +25,33 @@ test('CLI accepts audio export and bounded explicit storyboard times', () => {
   assert.deepEqual(parseArgs(['a.html', '--out', 'o', '--audio', '--times', '0,1.5,2.25']), { video: false, input: 'a.html', out: 'o', audio: true, times: [0, 1.5, 2.25] });
   for (const times of ['', '1,,2', '-1', 'a', '1e3', Array.from({ length: 61 }, (_, i) => i).join(',')]) assert.throws(() => parseArgs(['a.html', '--out', 'o', '--times', times]), times);
   assert.throws(() => parseArgs(['a.html', '--out', 'o', '--audio', '--audio']));
+});
+
+test('--root serves a parent directory and must contain the composition', async t => {
+  assert.equal(parseArgs(['a/b.html', '--out', 'o', '--root', 'a']).root, 'a');
+  for (const args of [['a.html', '--out', 'o', '--root'], ['a.html', '--out', 'o', '--root', '--video'], ['a.html', '--out', 'o', '--root', 'x', '--root', 'y']]) assert.throws(() => parseArgs(args));
+  const directory = await fixture(t);
+  await fs.mkdir(path.join(directory, 'films', 'a film'), { recursive: true });
+  await fs.mkdir(path.join(directory, 'elsewhere'));
+  const page = path.join(directory, 'films', 'a film', 'one#1.html');
+  await fs.writeFile(page, '<!doctype html>');
+  const real = await fs.realpath(directory);
+  assert.deepEqual(await servedPage(page), { input: path.join(real, 'films', 'a film', 'one#1.html'), root: path.join(real, 'films', 'a film'), pagePath: 'one%231.html' });
+  assert.equal((await servedPage(page, path.join(directory, 'films'))).pagePath, 'a%20film/one%231.html');
+  await assert.rejects(servedPage(page, path.join(directory, 'elsewhere')), /inside --root/);
+  await assert.rejects(servedPage(page, page), /directory/);
+  await assert.rejects(servedPage(path.join(directory, 'films')), /must be a file/);
+});
+
+test('static server types narration and caption assets', async t => {
+  const directory = await fixture(t);
+  await fs.writeFile(path.join(directory, 'v.flac'), 'fLaC');
+  await fs.writeFile(path.join(directory, 'c.vtt'), 'WEBVTT\n');
+  const server = await startServer(directory);
+  try {
+    assert.equal((await fetch(`${server.origin}/v.flac`)).headers.get('content-type'), 'audio/flac');
+    assert.equal((await fetch(`${server.origin}/c.vtt`)).headers.get('content-type'), 'text/vtt');
+  } finally { await server.close(); }
 });
 
 test('poster time is optional and must fall inside the film', () => {
@@ -149,18 +176,21 @@ test('repository checker validates every skill, kit-based compositions and catal
   await fs.writeFile(path.join(directory, 'examples/demo/a.html'), `window.motion = ${JSON.stringify(motion)}; window.renderFrame = () => {};`);
   await fs.writeFile(path.join(directory, 'examples/demo/kit.js'), 'window.motion = make(); window.renderFrame = t => t;');
   await fs.writeFile(path.join(directory, 'examples/demo/b.html'), '<script src="kit.js"></script>');
+  await fs.mkdir(path.join(directory, 'examples/shared'));
+  await fs.writeFile(path.join(directory, 'examples/shared/reel.js'), 'window.motion = make(); window.renderFrame = t => t;');
+  await fs.writeFile(path.join(directory, 'examples/demo/c.html'), '<script src="../shared/reel.js"></script>');
   const catalog = record => JSON.stringify({ version: 2, themes: [{ slug: 'demo', skill: 'x-motion-demo' }], motions: [record] });
   const film = { id: 'XM-0001', status: 'review', source: 'examples/demo/a.html', skills: ['x-motion', 'x-motion-demo'], ...motion };
   await fs.writeFile(path.join(directory, 'data/catalog.json'), catalog(film));
   const result = await check(directory);
   assert.deepEqual(result.skills.map(skill => skill.name), ['x-motion', 'x-motion-demo']);
-  assert.deepEqual(result.examples.map(example => [example.name, example.motion?.fps ?? null]), [['demo/a.html', 24], ['demo/b.html', null]]);
+  assert.deepEqual(result.examples.map(example => [example.name, example.motion?.fps ?? null]), [['demo/a.html', 24], ['demo/b.html', null], ['demo/c.html', null]]);
   await fs.writeFile(path.join(directory, 'data/catalog.json'), catalog({ ...film, duration: 3 }));
   await assert.rejects(check(directory), /duration disagrees/);
   await fs.writeFile(path.join(directory, 'data/catalog.json'), catalog({ ...film, source: 'examples/demo/missing.html' }));
   await assert.rejects(check(directory), /not an example composition/);
   await fs.writeFile(path.join(directory, 'data/catalog.json'), catalog({ ...film, status: 'discarded', source: 'examples/demo/missing.html' }));
-  assert.equal((await check(directory)).examples.length, 2);
+  assert.equal((await check(directory)).examples.length, 3);
   await writeSkill('x-motion-demo', 'Light \u2014 shade');
   await assert.rejects(check(directory), /em dash/);
   await writeSkill('x-motion-demo');
