@@ -21,11 +21,13 @@ const shots = [
 ];
 
 const COMPOSITE = `
-uniform float uFade;
+uniform float uFade, uZoom;
+uniform vec2 uFocus;
 const vec3 PAPER = vec3(0.888, 0.863, 0.815);
 vec3 spectrum(float x){ return clamp(vec3(1.5 - abs(4.*x - 3.), 1.5 - abs(4.*x - 2.), 1.5 - abs(4.*x - 1.)), 0., 1.); }
 void main(){
   vec2 uv = gl_FragCoord.xy / uRes;
+  uv = uFocus + (uv - uFocus) / uZoom;   // slow push toward the focus during the last held shot
   vec3 col;
   if (uShots < 1.5) col = A(uv);
   else {
@@ -47,10 +49,15 @@ void main(){
   outColor = finish(mix(PAPER, col, uFade));
 }`;
 
-const uniforms = t => ({ uFade: smooth(lin(t, 0, 0.6)) * (1 - smooth(lin(t, 58.4, 59.85))) });
+// The lens shot slows to a near-still from 48.5 s; a gentle push toward the ball and its focused light
+// keeps the held frame alive under the last lines without competing with them.
+const uniforms = t => ({
+  uFade: smooth(lin(t, 0, 0.6)) * (1 - smooth(lin(t, 58.4, 59.85))),
+  uZoom: 1 + 0.05 * smooth(lin(t, 46.5, 60)), uFocus: [0.56, 0.52],
+});
 
 const cards = [
-  { className: 'ink', html: '<div class="kicker">X Motion · Prism</div><div class="title">Bending Light</div>', at: [0.6, 1.8, 3.3, 4.3], rise: 14, lift: 8, blur: 6, track: [0.02, -0.03] },
+  { className: 'ink below', html: '<div class="kicker">X Motion · Prism</div><div class="title">Bending Light</div>', at: [0.6, 1.8, 3.3, 4.3], rise: 14, lift: 8, blur: 6, track: [0.02, -0.03] },
   { className: 'ink low', html: '<div class="title">Bending Light</div><div class="sub">Dispersion · Caustics · Lens</div>', at: [55.2, 56.4, 58.6, 59.6], rise: 12, blur: 5, track: [0.03, -0.025] },
 ];
 
@@ -107,13 +114,13 @@ async function score(S, FX, R) {
   }
   // water bed under caustics
   FX.noise({ t0: 20.8, t1: 41.6, seed: 59, color: 'pink', type: 'lowpass', freq: [[20.8, 900], [41.6, 900]], q: 0.5, gain: [[20.8, 0], [23, 0.07], [39.5, 0.07], [41.6, 0]] });
-  // the drop: a falling whistle, the impact, the splash, and the rings ringing out
+  // the drop: a falling whistle, the impact, the splash, and the rings ringing out (kept under the line it lands in)
   const fall = at('caustics', 2.25);
   const whistle = FX.ctx.createGain(); FX.curve(whistle.gain, [[fall, 0], [fall + 0.4, 0.02], [drop, 0.028], [drop + 0.02, 0]]); whistle.connect(FX.master);
   const wo = FX.osc('sine', hz(96), fall, drop + 0.05, whistle); FX.automate(wo.frequency, [[fall, hz(96)], [drop, hz(86), 'e']]);
-  const plop = FX.ctx.createGain(); FX.curve(plop.gain, [[drop, 0], [drop + 0.006, 0.4], [drop + 0.35, 0]]); plop.connect(FX.master); plop.connect(fxRoom);
+  const plop = FX.ctx.createGain(); FX.curve(plop.gain, [[drop, 0], [drop + 0.006, 0.2], [drop + 0.35, 0]]); plop.connect(FX.master); plop.connect(fxRoom);
   const po = FX.osc('sine', 330, drop, drop + 0.4, plop); FX.automate(po.frequency, [[drop, 330], [drop + 0.12, 140, 'e']]);
-  FX.noise({ t0: drop, t1: drop + 0.9, seed: 61, type: 'highpass', freq: [[drop, 2500], [drop + 0.9, 5000]], q: 0.6, gain: [[drop, 0], [drop + 0.01, 0.2], [drop + 0.9, 0]], send: fxRoom });
+  FX.noise({ t0: drop, t1: drop + 0.9, seed: 61, type: 'highpass', freq: [[drop, 2500], [drop + 0.9, 5000]], q: 0.6, gain: [[drop, 0], [drop + 0.01, 0.11], [drop + 0.9, 0]], send: fxRoom });
   [0, 0.42, 0.95, 1.6].forEach((dt, i) => FX.bell({ t: drop + dt, f: hz([78, 73, 69, 66][i]), amp: 0.06 * Math.pow(0.7, i), pan: (i - 1.5) * 0.25, partials: glass, send: room, sendAmt: 0.9 }));
   // the knit: a soft swell as the pattern closes
   const knit0 = at('caustics', 6.2), knit1 = at('caustics', 8.6);

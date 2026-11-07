@@ -51,3 +51,19 @@ test('audio export rejects a score that changes between renders', {skip}, async 
     await assert.rejects(render({input,out:join(dir,'output'),video:false,audio:true}),/determinism/i);
   } finally {await rm(dir,{recursive:true,force:true});}
 });
+// A reel cut from a scene that creates its 1920x1080 canvas lazily on its first renderFrame (as Prism's
+// Dispersion does) must load that scene and composite its pixels rather than failing or showing black.
+test('reel loads scenes whose canvas appears only after their first frame', {skip}, async () => {
+  const {cp, mkdir} = await import('node:fs/promises');
+  const dir=await mkdtemp(join(tmpdir(),'x-motion-reel-lazy-'));
+  try {
+    for (const d of ['orbit','reel','film']) await mkdir(join(dir,d));
+    await cp('examples/orbit/kit.js', join(dir,'orbit/kit.js'));
+    await cp('examples/reel/reel.js', join(dir,'reel/reel.js'));
+    await writeFile(join(dir,'film/lazy.html'), '<!doctype html><body><script>let c=null;window.motion={width:1920,height:1080,duration:2,fps:30};window.renderFrame=t=>{if(!c){c=document.createElement("canvas");c.width=1920;c.height=1080;document.body.appendChild(c)}const x=c.getContext("2d");x.fillStyle=t<1?"#c03020":"#2050d0";x.fillRect(0,0,1920,1080)};</script>');
+    await writeFile(join(dir,'film/index.html'), '<!doctype html><style>body{margin:0}.reel-canvas{position:absolute;inset:0}</style><body><script src="../orbit/kit.js"></script><script src="../reel/reel.js"></script><script>Reel.film({duration:2,poster:0.5,scenes:{lazy:"lazy.html"},shots:[{id:"a",scene:"lazy",keys:[[0,0],[2,2]]}],composite:"void main(){ outColor = finish(A(gl_FragCoord.xy / uRes)); }",score:async()=>{}});</script>');
+    const result=await render({input:join(dir,'film/index.html'),root:dir,out:join(dir,'output'),times:[0.5,1.5]});
+    assert.equal(result.determinismCheck.passed,true);
+    assert.notEqual(result.files[0].sha256,result.files[1].sha256,'the lazily created scene canvas reaches the reel');
+  } finally {await rm(dir,{recursive:true,force:true});}
+});

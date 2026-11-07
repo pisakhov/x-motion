@@ -48,6 +48,7 @@ Ink is not a colour you paint; it is an absorption. Composite with Beer-Lambert:
 - Edges of the frame stay quiet. A soft vignette toward `#e0d3ba` holds the eye inside.
 - The vermilion accent sits far from the main mass, small, low and late. It answers the gesture; it does not compete.
 - Check the thumbnail: the silhouette of the one gesture must read at 320 px wide.
+- In a narrated long film, the closing title is a colophon: small, right-aligned above the seal, clear of the stroke. Never lay type across the dry tail of a brush mark. Let the last image hold still; stillness is the ending.
 
 ## Motion vocabulary and timing
 

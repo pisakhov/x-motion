@@ -13,3 +13,9 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 .reel-card.low { justify-content: flex-end; padding-bottom: 120px; box-sizing: border-box; }
 .reel-card.low .title { font-size: 64px; font-weight: 350; }
 .reel-card.ink { color: #1d1b18; }
+/* opening title set below a subject that sits at the centre of frame */
+.reel-card.below { padding-top: 400px; box-sizing: border-box; }
+/* colophon: title stacked right-aligned above a seal or mark in the lower right */
+.reel-card.colophon { align-items: flex-end; justify-content: flex-end; text-align: right; padding: 0 230px 290px 0; box-sizing: border-box; }
+.reel-card.colophon .title { font-size: 64px; font-weight: 350; }
+.reel-card.colophon .sub { margin-top: 22px; }

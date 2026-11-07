@@ -322,7 +322,7 @@
       "id": "XM-0013",
       "title": "One Orbit",
       "description": "A narrated minute: the door opens, the planet rises, a day of sixteen sunrises passes and the moon covers the sun.",
-      "status": "review",
+      "status": "kept",
       "duration": 60,
       "width": 1920,
       "height": 1080,
@@ -357,6 +357,85 @@
         "Then the light comes back. It always does.",
         "One orbit. Then another."
       ]
+    },
+    {
+      "id": "XM-0014",
+      "title": "Bending Light",
+      "description": "A narrated minute: white light splits in a prism, water gathers it into living lines, and a glass sphere focuses it to a point.",
+      "status": "review",
+      "duration": 60,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0014.mp4",
+      "poster": "/media/XM-0014.webp",
+      "preview": "/media/XM-0014-preview.mp4",
+      "videoSha256": "85c846e0887e9178489713777ff77b390be7adaf7711a0c0f01a44a6bc3f2afb",
+      "posterSha256": "3f628b4a4f878ef5d6771dd7f6173dd71f4817a94595067bcbf97e7c6c92978f",
+      "previewSha256": "a5bd929db19b111c743a0bbd74474741c727fb7197ffca4c51984710bb1d23fe",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/prism/bending-light.html",
+      "hasAudio": true,
+      "theme": "prism",
+      "slug": "bending-light",
+      "prompt": "A sixty-second narrated film cut from Dispersion, Caustics and Lens. A beam strikes a prism and fans into its colours, red bending least and violet most; a refracting sheet of glass carries us to caustics on a pool floor, where one drop breaks the pattern and it knits back; a second pane carries us to a glass sphere rolling to rest and burning the light to a single point. Long narration, an original score of struck glass, sound effects locked to picture, a clean mix and designed transitions between shots. As strong as One Orbit. 1920×1080.",
+      "skills": [
+        "x-motion",
+        "x-motion-prism"
+      ],
+      "model": "claude-opus-5-5",
+      "captions": "/media/XM-0014.vtt",
+      "captionsSha256": "008d0fcc5f7aecb10e94ecaa16dc350ddbba0a9d68276d0edbb47d42c97eea97",
+      "transcript": [
+        "White light looks simple. It isn't.",
+        "Send it through glass, and it comes apart: every colour it was carrying, side by side.",
+        "Red bends the least. Violet bends the most.",
+        "Water does it too.",
+        "A surface moves, and light gathers into bright, living lines.",
+        "One drop, and the pattern breaks, rings out, and knits itself back together.",
+        "Glass can gather light, as well as split it.",
+        "A sphere becomes a lens, and the light it gathers burns to a single point.",
+        "Even now, the lens in your eye is bending light, to show you this."
+      ]
+    },
+    {
+      "id": "XM-0015",
+      "title": "One Breath",
+      "description": "A narrated minute: a drop of ink opens and becomes mist, the mist becomes mountains a crane crosses, and the paper clears for a single enso and its seal.",
+      "status": "review",
+      "duration": 60,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0015.mp4",
+      "poster": "/media/XM-0015.webp",
+      "preview": "/media/XM-0015-preview.mp4",
+      "videoSha256": "91a0f07afb0768c6023bc44b401431b05d4bacce6a58d27807b1e5dd13a5a8ae",
+      "posterSha256": "84299ad199e97103d696f69538526e34a61b0f355db4b90c020d4f246eb5270a",
+      "previewSha256": "bcd8cc9e576c16facec130aa570f4e344dc7052cea12c4858ae03bf26bd72614",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/sumi/one-breath.html",
+      "hasAudio": true,
+      "theme": "sumi",
+      "slug": "one-breath",
+      "prompt": "A sixty-second narrated film cut from Bloom, Mist and Stroke. A single drop of ink falls and opens like a flower under water, then lets go into mist; an ink wash carries us to a range of mountains a crane crosses; the paper clears to bare for one breath before a single enso is brushed and sealed. Long, unhurried narration, an original koto-like pentatonic score with long silences, sound effects locked to picture, a clean mix and designed transitions between shots. As strong as One Orbit. 1920×1080.",
+      "skills": [
+        "x-motion",
+        "x-motion-sumi"
+      ],
+      "model": "claude-opus-5-5",
+      "captions": "/media/XM-0015.vtt",
+      "captionsSha256": "56e315eeced3a432ed1946e39d8c3484ef6307aee4f3393f5efb7e4d8a3d19f1",
+      "transcript": [
+        "Begin with a single drop.",
+        "Ink never moves the same way twice.",
+        "It opens, slowly, like a flower under water.",
+        "Then it lets go, and becomes mist.",
+        "Far mountains need almost no ink at all. The paper does the rest.",
+        "A crane crosses. No one asks where it is going.",
+        "Last, the circle. One breath. One stroke.",
+        "It does not need to be perfect. Only finished."
+      ]
     }
   ],
   "feedback": [
@@ -380,6 +459,13 @@
       "previousStatus": "review",
       "status": "discarded",
       "note": "Owner did not like this film. Replaced by the themed collection."
+    },
+    {
+      "id": "XM-0013",
+      "timestamp": "2026-11-07T17:40:59.315Z",
+      "previousStatus": "review",
+      "status": "kept",
+      "note": "Owner approved One Orbit in X chat as absolutely amazing and asked for Prism and Sumi long films that are as strong or stronger."
     }
   ]
 }
