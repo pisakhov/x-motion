@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Trusted local compositions only: network isolation is not a security sandbox.
-// Usage: node scripts/render.mjs composition/index.html --out renders/name [--video]
-// Default: five storyboard PNGs + manifest. --video adds full frames and a SILENT MP4.
+// Usage: node scripts/render.mjs composition/index.html --out renders/name [--times a,b] [--audio] [--video]
+// Default: five storyboard PNGs + manifest. --audio exports the composition's score; --video adds frames, poster and MP4.
 import { createServer } from 'node:http';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -9,14 +9,20 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 
-export const HELP = `Usage: node scripts/render.mjs <index.html> --out <directory> [--video]
+export const HELP = `Usage: node scripts/render.mjs <index.html> --out <directory> [--times a,b,c] [--audio] [--video]
 Default: five storyboard PNGs and a SHA-256 manifest.
---video: also retain all frames and encode silent H.264/yuv420p film.mp4 with ffmpeg.
-Requires Playwright Chromium (npx playwright install chromium); video requires ffmpeg.
+--times: capture these timestamps (seconds) instead of the five storyboard frames.
+--audio: also export sound.wav from window.renderAudio and record loudness in the manifest.
+--video: also retain all frames, write poster.webp and encode H.264/yuv420p film.mp4.
+         When window.renderAudio exists, its score is muxed as AAC 192 kb/s.
+Requires Playwright Chromium (npx playwright install chromium); audio and video require ffmpeg.
 Output directory must be absent or empty. Only trusted local compositions are supported.
-Composition API: window.motion = {width,height,duration,fps}; window.renderFrame(seconds).
-No audio is exported. Assets must be inside the composition directory; no remote requests.
+Composition API: window.motion = {width,height,duration,fps[,poster]}; window.renderFrame(seconds);
+optional window.renderAudio({sampleRate}) returning an AudioBuffer (e.g. from OfflineAudioContext).
+Math.random is replaced by a fixed-seed generator in render mode. Assets must be inside the
+composition directory; no remote requests.
 `;
+export const SAMPLE_RATE = 48000;
 
 export function parseArgs(args) {
   if (args.length === 1 && ['--help', '-h'].includes(args[0])) return { help: true };
@@ -24,7 +30,13 @@ export function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--video' && !result.video) result.video = true;
-    else if (arg === '--out' && !result.out) {
+    else if (arg === '--audio' && !result.audio) result.audio = true;
+    else if (arg === '--times' && !result.times) {
+      const value = args[++i];
+      if (!value || !/^\d+(?:\.\d+)?(?:,\d+(?:\.\d+)?)*$/.test(value)) throw new Error('--times requires comma-separated seconds, e.g. 0,1.5,3');
+      result.times = value.split(',').map(Number);
+      if (result.times.length > 60) throw new Error('--times accepts at most 60 timestamps');
+    } else if (arg === '--out' && !result.out) {
       const value = args[++i];
       if (!value || value.startsWith('-')) throw new Error('--out requires a directory');
       result.out = value;
@@ -38,7 +50,7 @@ export function parseArgs(args) {
 
 export function validateMotion(value) {
   if (!value || typeof value !== 'object') throw new Error('window.motion must be an object');
-  const { width, height, duration, fps } = value;
+  const { width, height, duration, fps, poster } = value;
   for (const [key, number] of Object.entries({ width, height })) {
     if (!Number.isInteger(number) || number < 2 || number > 3840 || number % 2)
       throw new Error(`${key} must be an even integer from 2 to 3840`);
@@ -47,7 +59,9 @@ export function validateMotion(value) {
     throw new Error('duration must be finite and in (0, 120] seconds');
   if (!Number.isInteger(fps) || fps < 1 || fps > 60)
     throw new Error('fps must be an integer from 1 to 60');
-  return { width, height, duration, fps };
+  if (poster !== undefined && (!Number.isFinite(poster) || poster < 0 || poster >= duration))
+    throw new Error('poster must be a time in [0, duration) seconds');
+  return poster === undefined ? { width, height, duration, fps } : { width, height, duration, fps, poster };
 }
 
 export function frameTimes(motion, storyboard = false) {
@@ -108,6 +122,34 @@ function command(executable, args) {
   });
 }
 
+function output(executable, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', data => { stderr = (stderr + data).slice(-20000); });
+    child.once('error', reject);
+    child.once('exit', code => code === 0 ? resolve(stderr) : reject(new Error(`${executable} exited ${code}: ${stderr.slice(-4000)}`)));
+  });
+}
+
+// Interleaved little-endian PCM16 → canonical 44-byte RIFF/WAVE.
+export function wavFile(pcm, channels, sampleRate) {
+  if (![1, 2].includes(channels) || !Number.isInteger(sampleRate) || pcm.length % (2 * channels)) throw new Error('Invalid PCM layout');
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0); header.writeUInt32LE(36 + pcm.length, 4); header.write('WAVEfmt ', 8);
+  header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24); header.writeUInt32LE(sampleRate * channels * 2, 28);
+  header.writeUInt16LE(channels * 2, 32); header.writeUInt16LE(16, 34);
+  header.write('data', 36); header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+export function parseLoudness(text) {
+  const summary = text.slice(text.lastIndexOf('Summary:'));
+  const value = pattern => { const match = pattern.exec(summary); return match && match[1] !== '-inf' ? Number(match[1]) : null; };
+  return { integratedLufs: value(/I:\s+(-?[\d.]+|-inf) LUFS/), loudnessRangeLu: value(/LRA:\s+(-?[\d.]+) LU/), truePeakDbfs: value(/Peak:\s+(-?[\d.]+|-inf) dBFS/) };
+}
+
 async function evaluate(page, callback, argument) {
   let timer;
   try {
@@ -122,7 +164,7 @@ export async function render(options) {
   const input = await fs.realpath(options.input);
   if (!(await fs.stat(input)).isFile()) throw new Error('Input must be a file');
   const out = path.resolve(options.out);
-  if (options.video) await command('ffmpeg', ['-version']);
+  if (options.video || options.audio) await command('ffmpeg', ['-version']);
   const { chromium } = await import('playwright');
   let server, browser, unlock;
   try {
@@ -138,6 +180,11 @@ export async function render(options) {
       return route.abort('blockedbyclient');
     });
     await context.routeWebSocket('**/*', socket => { failures.push('WebSocket requests are unsupported'); socket.close(); });
+    // Deterministic stand-in for unseeded randomness (mulberry32, fixed seed) before any composition script runs.
+    await context.addInitScript(() => {
+      let state = 0x9e3779b9;
+      Math.random = () => { state = (state + 0x6d2b79f5) | 0; let x = Math.imul(state ^ (state >>> 15), 1 | state); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+    });
     const page = await context.newPage();
     page.on('pageerror', error => failures.push(error.message));
     page.on('response', response => { if (response.status() >= 400) failures.push(`Asset HTTP ${response.status()}: ${new URL(response.url()).pathname}`); });
@@ -175,19 +222,59 @@ export async function render(options) {
       if (file) await record(file, time);
       return createHash('sha256').update(image).digest('hex');
     };
+    const boardTimes = options.times ?? frameTimes(motion, true);
+    for (const time of boardTimes) if (time >= motion.duration) throw new Error(`--times value ${time} is outside the ${motion.duration}s duration`);
     await fs.mkdir(path.join(out, 'storyboard'));
-    for (const [index, time] of frameTimes(motion, true).entries()) await capture(time, `storyboard/${String(index).padStart(2, '0')}.png`);
+    for (const [index, time] of boardTimes.entries()) await capture(time, `storyboard/${String(index).padStart(2, '0')}.png`);
     // Seek backward after visiting later frames: state must depend only on t.
     // For a sub-frame composition, this still checks repeated-timestamp stability.
-    const repeatedHash = await capture(0);
-    if (repeatedHash !== files[0].sha256) throw new Error('Determinism check failed: frame at t=0 changed after seeking');
+    const repeatedHash = await capture(boardTimes[0]);
+    if (repeatedHash !== files[0].sha256) throw new Error(`Determinism check failed: frame at t=${boardTimes[0]} changed after seeking`);
+    const hasAudio = await evaluate(page, () => typeof window.renderAudio === 'function');
+    if (options.audio && !hasAudio) throw new Error('--audio requires window.renderAudio');
+    let audio = null;
+    if (hasAudio && (options.audio || options.video)) {
+      const frames = Math.round(motion.duration * SAMPLE_RATE);
+      const renderPcm = () => evaluate(page, async ({ sampleRate, frames }) => {
+        const buffer = await window.renderAudio({ sampleRate });
+        if (!buffer || typeof buffer.getChannelData !== 'function') throw new Error('renderAudio must return an AudioBuffer');
+        if (buffer.sampleRate !== sampleRate) throw new Error(`renderAudio returned ${buffer.sampleRate} Hz; expected ${sampleRate}`);
+        if (![1, 2].includes(buffer.numberOfChannels)) throw new Error('renderAudio must return one or two channels');
+        const channels = Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i));
+        const bytes = new Uint8Array(frames * channels.length * 2), view = new DataView(bytes.buffer);
+        let peak = 0, clipped = 0;
+        for (let i = 0; i < frames; i++) for (let c = 0; c < channels.length; c++) {
+          const sample = i < buffer.length ? channels[c][i] : 0;
+          if (!Number.isFinite(sample)) throw new Error('renderAudio produced a non-finite sample');
+          const magnitude = Math.abs(sample); if (magnitude > peak) peak = magnitude; if (magnitude > 1) clipped++;
+          view.setInt16((i * channels.length + c) * 2, Math.round(Math.max(-1, Math.min(1, sample)) * 32767), true);
+        }
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        return { channels: channels.length, sourceFrames: buffer.length, peak, clipped, base64: btoa(binary) };
+      }, { sampleRate: SAMPLE_RATE, frames });
+      const first = await renderPcm(), second = await renderPcm();
+      if (first.base64 !== second.base64) throw new Error('Audio determinism check failed: renderAudio returned different samples on a second call');
+      const wav = wavFile(Buffer.from(first.base64, 'base64'), first.channels, SAMPLE_RATE);
+      await fs.writeFile(path.join(out, 'sound.wav'), wav, { flag: 'wx' });
+      await record('sound.wav');
+      const loudness = parseLoudness(await output('ffmpeg', ['-hide_banner', '-nostats', '-nostdin', '-i', path.join(out, 'sound.wav'), '-af', 'ebur128=peak=true', '-f', 'null', '-']));
+      audio = { sampleRate: SAMPLE_RATE, channels: first.channels, frames, sourceFrames: first.sourceFrames, samplePeak: first.peak, clippedSamples: first.clipped, determinismCheck: { passed: true, sha256: createHash('sha256').update(wav).digest('hex') }, ...loudness };
+    }
     if (options.video) {
       await fs.mkdir(path.join(out, 'frames'));
-      for (const [index, time] of frameTimes(motion).entries()) await capture(time, `frames/${String(index).padStart(6, '0')}.png`);
-      await command('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-n', '-framerate', String(motion.fps), '-i', path.join(out, 'frames/%06d.png'), '-an', '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', path.join(out, 'film.mp4')]);
+      const times = frameTimes(motion);
+      for (const [index, time] of times.entries()) await capture(time, `frames/${String(index).padStart(6, '0')}.png`);
+      const posterTime = motion.poster ?? 0;
+      const posterIndex = Math.min(times.length - 1, Math.round(posterTime * motion.fps));
+      await command('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-n', '-i', path.join(out, `frames/${String(posterIndex).padStart(6, '0')}.png`), '-c:v', 'libwebp', '-quality', '90', path.join(out, 'poster.webp')]);
+      await record('poster.webp', times[posterIndex]);
+      const audioInput = audio ? ['-i', path.join(out, 'sound.wav')] : [];
+      const audioCodec = audio ? ['-map', '0:v', '-map', '1:a', '-c:a', 'aac', '-b:a', '192k'] : ['-an'];
+      await command('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-n', '-framerate', String(motion.fps), '-i', path.join(out, 'frames/%06d.png'), ...audioInput, ...audioCodec, '-c:v', 'libx264', '-preset', 'slow', '-crf', '18', '-threads', '1', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', path.join(out, 'film.mp4')]);
       await record('film.mp4');
     }
-    const manifest = { schemaVersion: 1, composition: path.basename(input), motion, audio: false, determinismCheck: { time: 0, afterTime: frameTimes(motion, true).at(-1), sha256: repeatedHash, passed: true }, mode: options.video ? 'video' : 'storyboard', playwrightVersion: (await import('playwright/package.json', { with: { type: 'json' } })).default.version, browserVersion: browser.version(), files };
+    const manifest = { schemaVersion: 2, composition: path.basename(input), motion, audio, determinismCheck: { time: boardTimes[0], afterTime: boardTimes.at(-1), sha256: repeatedHash, passed: true }, mode: options.video ? 'video' : 'storyboard', playwrightVersion: (await import('playwright/package.json', { with: { type: 'json' } })).default.version, browserVersion: browser.version(), files };
     await fs.writeFile(path.join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
     return manifest;
   } finally {
@@ -201,6 +288,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   try {
     const options = parseArgs(process.argv.slice(2));
     if (options.help) console.log(HELP);
-    else { const manifest = await render(options); console.log(`Rendered ${manifest.files.length} files to ${path.resolve(options.out)} (${manifest.mode}, silent).`); }
+    else { const manifest = await render(options); console.log(`Rendered ${manifest.files.length} files to ${path.resolve(options.out)} (${manifest.mode}, ${manifest.audio ? `audio ${manifest.audio.integratedLufs} LUFS, true peak ${manifest.audio.truePeakDbfs} dBFS` : 'silent'}).`); }
   } catch (error) { console.error(`Render failed: ${error.message}`); process.exitCode = 1; }
 }

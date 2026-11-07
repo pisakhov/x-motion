@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Eclipse · X Motion Orbit</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body>
+<script src="kit.js"></script>
+<script>
+'use strict';
+// Eclipse. A thin crescent is swallowed by the moon; at totality the corona unfolds in pearl
+// filaments and the stars come out; a single bead breaks through on the far edge (the diamond
+// ring) and the dark lifts. Original, procedural.
+//
+// Flat sky plane in screen-height units, sun at the origin. The moon moves along DIR with
+// offset d(t) = A u + B u^3 (u = t - 5): fast through the partial phases, slow through totality.
+// The lunar limb has valleys (a profile shared by GLSL and JS), so Baily's beads and the diamond
+// ring come out of the geometry, and the bead's glare is driven by a visible-area integral in JS.
+const { GLSL, V, clamp, lin, smooth, smoother, mix } = OrbitKit;
+const D = 10;
+const RS = 0.085, RM = RS * 1.04;
+const DIR = V.norm([1, -0.42, 0]).slice(0, 2);
+const A_ = 0.000957, B_ = 0.0001857;
+const offset = t => { const u = t - 5; return A_ * u + B_ * u * u * u; };
+const moonAt = t => [DIR[0] * offset(t), DIR[1] * offset(t)];
+
+// lunar limb valleys: periodic ridges plus a deep notch facing the far (diamond) edge and a few
+// shallower ones on the near (second contact) edge
+const PHIF = Math.atan2(-DIR[1], -DIR[0]), PHIN = Math.atan2(DIR[1], DIR[0]);
+const RIDGE = [[23, 0.00030, 1.3], [37, 0.00022, 4.1], [53, 0.00018, 0.7], [71, 0.00012, 2.9], [97, 0.00010, 5.3], [131, 0.00007, 3.6]];
+const NOTCH = [[PHIF + 0.02, 0.00125, 0.030], [PHIN - 0.16, 0.00060, 0.020], [PHIN + 0.05, 0.00072, 0.016], [PHIN + 0.21, 0.00055, 0.022], [PHIN - 0.33, 0.00045, 0.018]];
+const wrapd = x => x - 2 * Math.PI * Math.floor((x + Math.PI) / (2 * Math.PI));
+const valley = phi => {
+  let v = 0;
+  for (const [k, a, p] of RIDGE) v += a * Math.pow(0.5 + 0.5 * Math.sin(k * phi + p), 6);
+  for (const [c, a, w] of NOTCH) v += a * Math.exp(-Math.pow(wrapd(phi - c) / w, 2));
+  return v;
+};
+const f6 = x => x.toFixed(6);
+const VALLEY_GLSL = `
+float wrapd(float x){return x-6.28318530718*floor((x+3.14159265359)/6.28318530718);}
+float valley(float phi){float v=0.;
+${RIDGE.map(([k, a, p]) => `  v+=${f6(a)}*pow(.5+.5*sin(${k}.*phi+${f6(p)}),6.);`).join('\n')}
+${NOTCH.map(([c, a, w]) => `  v+=${f6(a)}*exp(-pow(wrapd(phi-(${f6(c)}))/${f6(w)},2.));`).join('\n')}
+  return v;}
+`;
+
+// visible photosphere: limb-darkened fraction and centroid, integrated over sun-centred rays
+const ld = mu => 1 - 0.62 * (1 - mu) - 0.16 * (1 - mu) * (1 - mu);
+const covered = (x, y, m) => { const dx = x - m[0], dy = y - m[1]; return Math.hypot(dx, dy) < RM - valley(Math.atan2(dy, dx)); };
+const LDTOT = (() => { let s = 0; const n = 400; for (let i = 0; i < n; i++) { const r = (i + 0.5) / n; s += ld(Math.sqrt(1 - r * r)) * r / n; } return s * 2 * Math.PI; })();
+function visible(t) {
+  const m = moonAt(t), N = 720; let w = 0, cx = 0, cy = 0;
+  for (let i = 0; i < N; i++) {
+    const a = (i + 0.5) / N * 2 * Math.PI, c = Math.cos(a), s = Math.sin(a);
+    if (covered(RS * c, RS * s, m)) continue;
+    let lo = 0, hi = 1;                       // lo covered, hi visible (radius in sun units)
+    if (!covered(0, 0, m)) lo = -1;
+    else for (let k = 0; k < 22; k++) { const mid = (lo + hi) / 2; if (covered(RS * mid * c, RS * mid * s, m)) lo = mid; else hi = mid; }
+    const r0 = Math.max(lo, 0), rm = (r0 + 1) / 2;
+    const dw = (1 - r0 * r0) / 2 * ld(Math.sqrt(Math.max(1 - rm * rm, 0))) * (2 * Math.PI / N);
+    w += dw; cx += dw * RS * rm * c; cy += dw * RS * rm * s;
+  }
+  return { f: w / LDTOT, x: w > 0 ? cx / w : 0, y: w > 0 ? cy / w : 0 };
+}
+// contact times, found once by scanning and bisection (pure functions of the geometry)
+const edge = (a, b, want) => { for (let i = 0; i < 50; i++) { const m = (a + b) / 2; if ((visible(m).f > 0) === want) a = m; else b = m; } return (a + b) / 2; };
+const T2 = edge(2.0, 5.0, true);      // last instant of photosphere before totality
+const T3 = edge(7.5, 5.0, true);      // first bead after totality (the diamond ring)
+
+// ------------------------------------------------------------------ shared
+const COMMON = `
+uniform vec2 uMoonC;uniform float uZoom;
+const float RS=${f6(RS)},RM=${f6(RM)};
+${VALLEY_GLSL}
+vec2 world(){return pix()/uZoom;}
+float ldark(float mu){return 1.-.62*(1.-mu)-.16*(1.-mu)*(1.-mu);}
+// photosphere visibility: x = sun coverage, y = moon coverage, z = limb darkening
+vec3 disks(vec2 w,float px){
+  float sr=length(w);vec2 m=w-uMoonC;float rl=RM-valley(atan(m.y,m.x));
+  float sc=clamp(.5+(RS-sr)/px,0.,1.),mc=clamp(.5+(rl-length(m))/px,0.,1.);
+  float mu=sqrt(max(1.-sr*sr/(RS*RS),0.));
+  return vec3(sc,mc,ldark(mu));
+}
+`;
+
+// ------------------------------------------------------------------ scene (half res, HDR)
+// rgb: corona (not masked by the moon; the composite masks it at full res). a: visible photosphere.
+const SCENE = GLSL + COMMON + `
+uniform float uCor,uUnfold,uI0;
+vec3 corona(vec2 w){
+  float rr=max(length(w)/RS,1.);float ang=atan(w.y,w.x);
+  float an=ang-.38;
+  // helmet streamers: broad equatorial pair plus three oblique ones; they fall off slowly
+  float s=pow(abs(cos(an)),5.)*.85
+    +.75*exp(-pow(wrapd(an-.95)/.20,2.))+.55*exp(-pow(wrapd(an+2.35)/.24,2.))+.45*exp(-pow(wrapd(an-2.55)/.16,2.));
+  s=clamp(s,0.,1.2);
+  float e=mix(5.2,2.15,clamp(s,0.,1.));
+  float base=pow(rr,-e);
+  // streamers bend toward the equator with height; polar plumes stay straight
+  float ab=ang+.10*(rr-1.)*sin(2.*an)/(1.+.4*(rr-1.));
+  float lr=log(rr);
+  float fil=fbm3(vec3(cos(ab)*26.,sin(ab)*26.,lr*1.3),4);
+  float fine=vnoise3(vec3(cos(ab)*95.,sin(ab)*95.,lr*2.5+3.));
+  float tex=.42+1.05*smoothstep(.32,.80,fil)+.28*(fine-.5);
+  float polar=pow(abs(sin(an)),10.)*.55*pow(rr,-3.6)*(.4+1.2*smoothstep(.45,.85,vnoise3(vec3(cos(ab)*140.,sin(ab)*140.,lr))));
+  float I=1.5*pow(rr,-10.)+.95*base*(.35+.8*s)*tex+polar;
+  I*=exp(-max(rr-1.,0.)/max(uUnfold,.02));
+  vec3 c=mix(vec3(1.,.95,.88),vec3(.84,.91,1.),smoothstep(1.05,2.6,rr));
+  return c*I*uCor*smoothstep(.996,1.001,length(w)/RS);
+}
+void main(){
+  vec2 w=world();float px=1./(uRes.y*uZoom);
+  vec3 dk=disks(w,px);
+  float ph=uI0*dk.z*dk.x*(1.-dk.y);
+  outColor=vec4(corona(w)*(1.-dk.y),ph);   // moon-masked here too, so the bloom mips stay clean
+}`;
+
+// ------------------------------------------------------------------ composite (full res)
+const COMPOSITE = GLSL + COMMON + `
+uniform sampler2D uScene;
+uniform float uI0,uStars,uLift,uRing,uVeil,uFade,uChromo;
+uniform vec2 uRingP,uVisC;
+vec3 stars(vec3 rd,float fwr){
+  vec3 acc=vec3(0.);
+  for(int l=0;l<2;l++){
+    float F=l==0?150.:340.;
+    vec3 g=rd*F,c=floor(g),f=g-c;
+    vec3 h=hash33(c+float(l)*31.7);
+    if(h.x>(l==0?.09:.03))continue;
+    vec3 d=f-(.2+.6*hash33(c+7.3));
+    float sig=max(fwr*F*.9,.04);
+    float b=(l==0?.6:.35)*(.10+pow(h.y,6.)*4.)*(.02*.02)/(sig*sig+.0004)*6.;
+    acc+=mix(vec3(.72,.82,1.),vec3(1.,.88,.72),h.z)*b*exp(-dot(d,d)/(2.*sig*sig));
+  }
+  return acc;
+}
+// 3x3 tent over one mip level: removes the staircase that a single bilinear tap shows on HDR glare
+// (four bilinear taps at half-texel offsets = a 3x3 tent)
+float tent(vec2 uv,float l){vec2 o=exp2(l)/uRes;
+  return .25*(textureLod(uScene,uv+o,l).a+textureLod(uScene,uv-o,l).a+textureLod(uScene,uv+vec2(o.x,-o.y),l).a+textureLod(uScene,uv+vec2(-o.x,o.y),l).a);}
+void main(){
+  vec2 uv=gl_FragCoord.xy/uRes;vec2 w=world();float px=1./(uRes.y*uZoom);
+  vec3 dk=disks(w,px);float sun=dk.x,moon=dk.y;
+  vec4 sc=texture(uScene,uv);
+  float sr=length(w),rr=sr/RS,ang=atan(w.y,w.x);
+  // sky: true black, lifting to deep navy after third contact
+  vec3 col=vec3(.0035,.009,.028)*uLift*(1.+2.5*exp(-sr*3.));
+  vec3 rd=normalize(vec3(w*1.1,1.));float fwr=length(fwidth(rd));
+  col+=stars(rd,fwr)*uStars*(1.-sun)*(1.-moon)*(1.-clamp(luma(sc.rgb)*3.,0.,1.));
+  // corona, masked by the moon at full resolution
+  col+=sc.rgb*(1.-sun)*(1.-moon);
+  // chromosphere: thin pink rim with spicules, and three prominences
+  float chro=0.,pr=0.;
+  if(rr>.99&&rr<1.5&&uChromo>0.){
+  float spic=.55+.9*vnoise2(vec2(ang*260.,1.7));
+  chro=smoothstep(.997,1.001,rr)*exp(-max(rr-1.,0.)/.0055)*spic;
+  for(int i=0;i<3;i++){
+    float a=i==0?2.35:(i==1?-.55:.62),hgt=i==0?.085:(i==1?.06:.05),wd=i==0?.05:(i==1?.035:.03);
+    float da=wrapd(ang-a);
+    float loop=exp(-pow(da/wd,2.))*smoothstep(.999,1.003,rr)*exp(-max(rr-1.,0.)/hgt);
+    if(loop<1e-4)continue;
+    float tx=smoothstep(.35,.75,fbm2(vec2(da*90.+float(i)*7.,rr*70.),3));
+    pr+=loop*(.35+1.3*tx);
+  }}
+  col+=vec3(1.,.22,.36)*(chro*5.+pr*2.2)*uChromo*(1.-moon);
+  // photosphere, sharp at full res; slightly orange toward the very limb
+  vec3 pc=mix(vec3(1.,.80,.58),vec3(1.,.96,.90),dk.z);
+  col+=pc*uI0*dk.z*sun*(1.-moon);
+  // faint earthshine on the moon's face
+  col+=vec3(.0010,.0016,.0030)*moon*(1.-uLift*.5);
+  // bloom from the scene mips: corona glow and photosphere glare
+  vec3 cb=textureLod(uScene,uv,3.).rgb*.5+textureLod(uScene,uv,5.).rgb*.5;
+  float pb=sr<.5?tent(uv,2.)*.35+tent(uv,3.5)*.35+tent(uv,5.)*.30:textureLod(uScene,uv,5.).a*.28;
+  col+=cb*.05+vec3(1.,.86,.70)*pb*.03;
+  // the bead's glare (lens, from the JS visible-area integral) and a wide veil from the crescent
+  vec2 dr=w-uRingP;float dl=length(dr);
+  col+=vec3(1.,.92,.82)*uRing*(16./(1.+pow(dl/.0019,2.))+1.7/(1.+pow(dl/.010,2.))+.12/(1.+pow(dl/.03,2.))+.02*exp(-dl*4.))
+      +vec3(.75,.85,1.)*uRing*.08*exp(-pow(dr.y/.0012,2.))*exp(-abs(dr.x)*24.);
+  float dv=length(w-uVisC);
+  col+=vec3(1.,.90,.80)*uVeil*(.014/(1.+pow(dv/.10,2.))+.002*exp(-dv*2.));
+  vec2 vq=uv-.5;col*=1.-.32*dot(vq,vq)*1.6;
+  col=srgb(aces(col));
+  outColor=vec4(dither(col)*uFade,1.);
+}`;
+
+// ------------------------------------------------------------------ timeline (closed form)
+function uniforms(t) {
+  const v = visible(t), m = moonAt(t);
+  const g = v.f > 0 ? Math.log(1 + v.f * 1e6) / Math.log(1 + 1e6) : 0;
+  const ring = g * (1 - smooth(lin(v.f, 0.0008, 0.008)));
+  const unfold = 0.03 + 3.5 * smoother(lin(t, T2 - 0.25, T2 + 1.9));
+  const cor = 0.35 + 0.65 * smooth(lin(t, T2 - 0.4, T2 + 0.6));
+  const after = smooth(lin(t, T3 + 0.15, T3 + 1.6));
+  return {
+    uMoonC: m, uZoom: 1 + 0.07 * smoother(lin(t, 0, 10)),
+    uI0: 90, uCor: 0.8 * cor * (1 - 0.55 * after), uUnfold: unfold,
+    uChromo: smooth(lin(t, T2 - 0.5, T2 + 0.2)) * (1 - smooth(lin(t, T3 + 0.4, T3 + 1.4))),
+    uStars: smooth(lin(t, T2 + 0.3, T2 + 1.6)) * (1 - smooth(lin(t, T3 + 0.1, T3 + 1.1))),
+    uLift: smooth(lin(t, T3 + 0.5, 9.6)),
+    uRing: ring * (t < 5 ? 0.6 : 1.6), uRingP: [v.x, v.y],
+    uVeil: Math.sqrt(v.f), uVisC: [v.x, v.y],
+    uFade: smooth(lin(t, 0, 0.8)) * (1 - smooth(lin(t, 9.35, 9.97))),
+  };
+}
+
+// ------------------------------------------------------------------ score: near silence, one bell
+async function score(S) {
+  const { ctx, bell, noise, osc, curve, reverb } = S;
+  const hall = reverb(4.6, 23, { decay: 3.6, pre: 0.035, dark: 0.55 }, 0.55);
+  const tone = (f, pts, { pan = 0, det = 0, send = hall, sendAmt = 0.5 } = {}) => {
+    const g = ctx.createGain(); curve(g.gain, pts);
+    const p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(S.master);
+    if (send) { const sg = ctx.createGain(); sg.gain.value = sendAmt; g.connect(sg); sg.connect(send); }
+    osc('sine', f, pts[0][0], pts[pts.length - 1][0] + 0.02, g, det); return g;
+  };
+  // the crescent's air thins to silence at second contact
+  noise({ t0: 0, t1: T2 + 0.6, seed: 3, color: 'pink', type: 'bandpass', freq: [[0, 700], [T2 + 0.6, 2600, 'e']], q: 0.7, gain: [[0, 0], [0.6, 0.06], [T2 - 1.2, 0.035], [T2 + 0.6, 0]], pan: [[0, 0.35], [T2 + 0.6, 0.1]], send: hall, sendAmt: 0.3 });
+  noise({ t0: 0, t1: T2 + 0.3, seed: 5, color: 'brown', type: 'lowpass', freq: [[0, 220], [T2 + 0.3, 120]], q: 0.5, gain: [[0, 0], [0.8, 0.05], [T2 + 0.3, 0]] });
+  // totality: a barely-there pair of high sines, beating slowly, like held breath
+  tone(1567.98, [[T2 + 0.2, 0], [T2 + 1.6, 0.0022], [T3 - 1.4, 0.0026], [T3 - 0.1, 0]], { pan: -0.3, sendAmt: 1.2 });
+  tone(1570.6, [[T2 + 0.5, 0], [T2 + 1.9, 0.0018], [T3 - 1.4, 0.0022], [T3 - 0.1, 0]], { pan: 0.3, sendAmt: 1.2 });
+  // a swell that leans into the bead, cut exactly at it
+  noise({ t0: T3 - 1.7, t1: T3, seed: 11, color: 'white', type: 'bandpass', freq: [[T3 - 1.7, 1800], [T3, 5200, 'e']], q: 1.2, gain: [[T3 - 1.7, 0], [T3 - 0.08, 0.018], [T3, 0]], pan: [[T3 - 1.7, 0.4], [T3, -0.3]], send: hall, sendAmt: 0.8 });
+  tone(392.0, [[T3 - 1.5, 0], [T3 - 0.06, 0.010], [T3, 0]], { pan: -0.2, sendAmt: 1.0 });
+  // the bell at the diamond ring: one tone, inharmonic partials, long hall bloom
+  const end = 9.55 - T3;
+  bell({ t: T3, f: 392.0, amp: 0.30, pan: -0.25, attack: 0.003, send: hall, sendAmt: 1.1, dur: end,
+    partials: [[0.5, 0.34, 2.3, 0], [1, 0.80, 1.9, 0], [1, 0.25, 1.9, 2.5], [1.183, 0.30, 1.3, 0], [1.506, 0.20, 1.0, 0], [2.0, 0.26, 0.85, 0], [2.0, 0.08, 0.85, -3], [2.514, 0.12, 0.55, 0], [3.011, 0.08, 0.40, 0], [4.166, 0.05, 0.28, 0], [5.43, 0.03, 0.18, 0]] });
+  // the light returning: a faint warm air under the bell's decay
+  noise({ t0: T3 + 0.3, t1: 9.6, seed: 17, color: 'pink', type: 'lowpass', freq: [[T3 + 0.3, 600], [9.6, 1400]], q: 0.5, gain: [[T3 + 0.3, 0], [8.6, 0.03], [9.6, 0]], pan: [[T3, -0.2], [9.6, 0.2]], send: hall, sendAmt: 0.3 });
+  curve(S.master.gain, [[0, 1], [9.0, 1], [9.7, 0]]);
+}
+
+OrbitKit.film({ duration: D, poster: 7.1, sceneScale: 0.5, scene: SCENE, composite: COMPOSITE, uniforms, score });
+console.log('eclipse contacts', T2.toFixed(3), T3.toFixed(3));
+</script>
+</body></html>

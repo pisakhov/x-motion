@@ -65,35 +65,38 @@ Refine approved beats with final typography, assets, lighting or graphic treatme
 When using the X Motion HTML renderer, each composition exposes:
 
 ```js
-window.motion = { width: 1920, height: 1080, duration: 8, fps: 30 };
+window.motion = { width: 1920, height: 1080, duration: 8, fps: 30, poster: 5.5 };
 window.renderFrame = function (tSeconds) {
   // Set every animated property from this timestamp and fixed scene data.
   // Repeated calls, including calls out of order, produce the same frame.
 };
+window.renderAudio = async function ({ sampleRate }) {
+  // Optional. Build the score in an OfflineAudioContext and return its AudioBuffer.
+};
 ```
 
-These numbers are illustrative, not design defaults. Width and height are pixels; duration and `tSeconds` are seconds; fps is the frame rate. Match them to the brief.
+These numbers are illustrative, not design defaults. Width and height are pixels; duration, `poster` and `tSeconds` are seconds; fps is the frame rate. `poster` is optional and names the frame used as the thumbnail. Match them to the brief.
 
 - Calculate state directly from the supplied timestamp. No wall-clock time, autonomous CSS animations, accumulating simulation steps, network assets, or unseeded randomness.
 - Load and decode local assets and fonts before capture. Do not introduce asynchronous frame mutations after `renderFrame` returns; verify the host renderer's readiness mechanism.
 - Define behavior at beat boundaries and beyond the active interval. Test repeated timestamps and backward seeks.
-- The frame function defines visuals, not audio playback. Use an explicit audio timeline and the host pipeline's supported muxing path; do not assume HTML media playback will be captured.
+- The frame function defines visuals, not audio playback. Sound comes only from `renderAudio`: one or two channels, rendered offline, identical on every call. HTML media playback is never captured.
 
-Resolve this skill directory's real location first, following any installation symlink into the full X Motion clone. The repository root is `../..` relative to that resolved `skills/x-motion` directory—not relative to the user's current working directory. Change to that repository root before running these commands; composition paths below are relative to it.
+Resolve this skill directory's real location first, following any installation symlink into the full X Motion clone. The repository root is `../..` relative to that resolved `skills/x-motion` directory, not relative to the user's current working directory. Change to that repository root before running these commands; composition paths below are relative to it.
 
-Export storyboard PNGs and `manifest.json` (no video by default):
+Export storyboard PNGs and `manifest.json` (no video by default). Add `--times 0.5,2,4.25` to choose the stills and `--audio` to also export `sound.wav` with loudness figures:
 
 ```sh
-node scripts/render.mjs path/to/scene.html --out renders/name-storyboard
+node scripts/render.mjs path/to/scene.html --out renders/name-storyboard --audio
 ```
 
-Export storyboard PNGs, full frames, silent `film.mp4`, and `manifest.json`:
+Export storyboard PNGs, full frames, `poster.webp`, `film.mp4` (with the score muxed as AAC when `renderAudio` exists) and `manifest.json`:
 
 ```sh
 node scripts/render.mjs path/to/scene.html --out renders/name-video --video
 ```
 
-Use a fresh output directory for each revision. Inspect `manifest.json` and the actual outputs before reporting success. Video encoding requires ffmpeg; audio is not captured. Optional sound synthesis and separate audio muxing are documented in the repository's example guide, not implied by `--video`. In another host, preserve deterministic timestamp semantics and adapt the export command.
+Use a fresh output directory for each revision. Inspect `manifest.json` and the actual outputs before reporting success: it records a frame determinism check, an audio determinism check, integrated loudness, true peak and clipped samples. Video encoding requires ffmpeg. In another host, preserve deterministic timestamp semantics and adapt the export command.
 
 ## 5. Critique → revise → deliver
 

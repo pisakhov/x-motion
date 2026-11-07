@@ -30,59 +30,94 @@ export function localReferences(text) {
   }))];
 }
 
-// Accept only the four numeric literals; do not eval arbitrary JavaScript.
+// Accept only numeric literals for the known fields; never eval composition JavaScript.
 export function extractMotion(html) {
   const body = /window\.motion\s*=\s*\{([^}]+)\}/.exec(html)?.[1];
-  if (!body) throw new Error('Provide metadata.json (or motion.json), or literal window.motion metadata');
+  if (!body) throw new Error('Provide literal window.motion metadata');
   const value = {};
   for (const field of body.split(',').map(field => field.trim()).filter(Boolean)) {
-    const match = /^(?:["']?)(width|height|duration|fps)(?:["']?)\s*:\s*(\d+(?:\.\d+)?(?:e[+-]?\d+)?)$/i.exec(field);
+    const match = /^(?:["']?)(width|height|duration|fps|poster)(?:["']?)\s*:\s*(\d+(?:\.\d+)?(?:e[+-]?\d+)?)$/i.exec(field);
     if (!match || Object.hasOwn(value, match[1])) throw new Error('window.motion must contain unique numeric metadata literals');
     value[match[1]] = Number(match[2]);
   }
   return validateMotion(value);
 }
 
-export async function check(root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')) {
-  const skillDir = path.join(root, 'skills/x-motion');
-  const skillPath = path.join(skillDir, 'SKILL.md');
-  const skill = await fs.readFile(skillPath, 'utf8');
+// Visible copy rule shared by skills and site templates: no em dashes.
+export function assertNoEmDash(text, label) {
+  const line = text.split('\n').findIndex(row => row.includes('\u2014'));
+  if (line >= 0) throw new Error(`${label}:${line + 1}: replace the em dash`);
+}
+
+async function checkSkill(skillsDir, name) {
+  const skillDir = path.join(skillsDir, name);
+  const skill = await fs.readFile(path.join(skillDir, 'SKILL.md'), 'utf8');
   const frontmatter = validateFrontmatter(skill);
-  if (frontmatter.name !== 'x-motion') throw new Error('Expected skill name x-motion');
-  const references = localReferences(skill);
-  if (!references.length) throw new Error('Skill must link to its references');
+  if (frontmatter.name !== name) throw new Error(`skills/${name}: frontmatter name must be ${name}`);
+  assertNoEmDash(skill, `skills/${name}/SKILL.md`);
   const realSkillDir = await fs.realpath(skillDir);
+  const references = localReferences(skill);
   for (const ref of references) {
     const file = await fs.realpath(path.join(skillDir, ref));
-    if (!file.startsWith(`${realSkillDir}${path.sep}`) || !(await fs.stat(file)).isFile()) throw new Error(`Invalid skill reference: ${ref}`);
-    if (!(await fs.readFile(file, 'utf8')).trim()) throw new Error(`Empty skill reference: ${ref}`);
+    if (!file.startsWith(`${realSkillDir}${path.sep}`) || !(await fs.stat(file)).isFile()) throw new Error(`skills/${name}: invalid reference ${ref}`);
+    const text = await fs.readFile(file, 'utf8');
+    if (!text.trim()) throw new Error(`skills/${name}: empty reference ${ref}`);
+    if (file.endsWith('.md')) assertNoEmDash(text, `skills/${name}/${ref}`);
   }
-  const examplesDir = path.join(root, 'examples');
-  const entries = (await fs.readdir(examplesDir, { withFileTypes: true })).filter(entry => entry.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
-  if (!entries.length) throw new Error('At least one example is required');
+  return { name, references: references.length };
+}
+
+async function htmlFiles(directory, prefix = '') {
+  const found = [];
+  for (const entry of (await fs.readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) found.push(...await htmlFiles(path.join(directory, entry.name), relative));
+    else if (entry.isFile() && entry.name.endsWith('.html')) found.push(relative);
+  }
+  return found;
+}
+
+export async function check(root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')) {
+  const skillsDir = path.join(root, 'skills');
+  const skillNames = (await fs.readdir(skillsDir, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
+  if (!skillNames.includes('x-motion')) throw new Error('The core x-motion skill is required');
+  const skills = [];
+  for (const name of skillNames) skills.push(await checkSkill(skillsDir, name));
+  if (!skills.find(skill => skill.name === 'x-motion').references) throw new Error('The core skill must link to its references');
+
   const examples = [];
-  for (const entry of entries) {
-    const directory = path.join(examplesDir, entry.name);
-    const names = await fs.readdir(directory);
-    const html = await fs.readFile(path.join(directory, 'index.html'), 'utf8');
-    if (!/window\.renderFrame\s*=/.test(html)) throw new Error(`${entry.name}: missing window.renderFrame assignment`);
-    const sidecar = ['metadata.json', 'motion.json'].find(name => names.includes(name));
-    const motion = sidecar ? validateMotion(JSON.parse(await fs.readFile(path.join(directory, sidecar), 'utf8'))) : extractMotion(html);
-    if (sidecar && /window\.motion\s*=\s*\{/.test(html)) {
-      const inline = extractMotion(html);
-      if (JSON.stringify(inline) !== JSON.stringify(motion)) throw new Error(`${entry.name}: inline and sidecar metadata disagree`);
-    }
-    const briefName = names.find(name => name.toLowerCase() === 'brief.md');
-    if (!briefName || !(await fs.readFile(path.join(directory, briefName), 'utf8')).trim()) throw new Error(`${entry.name}: nonempty brief.md is required`);
-    examples.push({ name: entry.name, motion });
+  for (const relative of await htmlFiles(path.join(root, 'examples'))) {
+    const html = await fs.readFile(path.join(root, 'examples', relative), 'utf8');
+    // A composition defines the contract inline, or through a sibling kit script loaded by relative path.
+    const kits = [...html.matchAll(/<script\s+src="([A-Za-z0-9_-]+\.js)"><\/script>/g)].map(match => match[1]);
+    let contract = html;
+    for (const kit of kits) contract += await fs.readFile(path.join(root, 'examples', path.dirname(relative), kit), 'utf8');
+    if (!/window\.renderFrame\s*=/.test(contract)) throw new Error(`examples/${relative}: missing window.renderFrame assignment`);
+    if (!/window\.motion\s*=/.test(contract)) throw new Error(`examples/${relative}: missing window.motion metadata`);
+    // Fully literal metadata is validated here; computed metadata is validated by the renderer at run time.
+    let motion = null;
+    try { motion = extractMotion(html); } catch { /* computed metadata */ }
+    examples.push({ name: relative, source: `examples/${relative}`, motion });
   }
-  return { references: references.length, examples };
+  if (!examples.length) throw new Error('At least one example composition is required');
+
+  const catalog = JSON.parse(await fs.readFile(path.join(root, 'data/catalog.json'), 'utf8'));
+  for (const theme of catalog.themes ?? []) if (!skillNames.includes(theme.skill)) throw new Error(`Theme ${theme.slug} names a missing skill ${theme.skill}`);
+  for (const motion of catalog.motions ?? []) {
+    if (motion.status === 'discarded') continue;
+    const example = examples.find(item => item.source === motion.source);
+    if (!example) throw new Error(`${motion.id}: source ${motion.source} is not an example composition`);
+    if (example.motion) for (const field of ['width', 'height', 'duration']) if (example.motion[field] !== motion[field]) throw new Error(`${motion.id}: ${field} disagrees with ${motion.source}`);
+    for (const skill of motion.skills ?? []) if (!skillNames.includes(skill)) throw new Error(`${motion.id}: missing skill ${skill}`);
+  }
+  for (const file of ['scripts/site-pages.mjs']) assertNoEmDash(await fs.readFile(path.join(root, file), 'utf8'), file);
+  return { skills, examples };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
     if (process.argv.length > 2) throw new Error('Usage: node scripts/check.mjs');
     const result = await check();
-    console.log(`Static checks passed: ${result.references} references, ${result.examples.length} examples. No aesthetic or browser claims.`);
+    console.log(`Static checks passed: ${result.skills.length} skills, ${result.examples.length} compositions. No aesthetic or browser claims.`);
   } catch (error) { console.error(`Check failed: ${error.message}`); process.exitCode = 1; }
 }

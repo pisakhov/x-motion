@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Terminator Line · X Motion Orbit</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body>
+<script src="kit.js"></script>
+<script>
+'use strict';
+// Terminator Line. Low orbit along the day/night line: amber cities on the night side,
+// thin cloud bands catching first light, a faint aurora breathing at the horizon, and the
+// sunlight finally reaching the ground below. One continuous shot. Original, procedural.
+//
+// Everything is solved in the camera frame: the camera is fixed at (0, 1+h, 0) looking along
+// +z, and the planet turns under it about the x axis by theta(t). Surface features are looked up
+// at q = Rx(-theta) n, and the fixed sun becomes S(t) = Rx(theta) S0 (that is what an orbit does).
+const { GLSL, V, clamp, lin, smooth, smoother, mix } = OrbitKit;
+const D = 10;
+// Low orbit needs a realistic (thin) atmosphere relative to altitude: Earth-like scale heights.
+const ATMO = OrbitKit.ATMO
+  .replace('vec3(11.8,27.4,67.0)', 'vec3(30.,70.,172.)').replace('BETA_M=26.0', 'BETA_M=9.0')
+  .replace('HR=.0045,HM=.0014', 'HR=.0017,HM=.0006').replace('RTOP=1.035', 'RTOP=1.014')
+  .replace('smoothstep(.996,1.002,r0)', 'smoothstep(.9988,1.0006,r0)');
+
+const COMMON = `
+uniform vec3 uCamPos,uCamR,uCamU,uCamF;
+uniform float uFocal,uTheta,uBreath;
+vec3 toPlanet(vec3 n,float th){float c=cos(th),s=sin(th);return vec3(n.x,n.y*c-n.z*s,n.y*s+n.z*c);}
+`;
+
+// ------------------------------------------------------------------ scene pass (half res, HDR)
+const SCENE = GLSL + ATMO + COMMON + `
+uniform vec3 uMoon,uPole;uniform float uHaze;
+const float RC=1.0035;           // cloud deck
+float landH(vec3 q){float w=fbm3(q*3.1+vec3(2.,7.,1.),3);return fbm3(q*4.6+(w-.5)*1.3,5);}
+vec3 ground(vec3 n,vec3 rd,out float city){
+  vec3 q=toPlanet(n,uTheta);
+  float h=landH(q);
+  float land=smoothstep(.585,.60,h),coast=exp(-abs(h-.592)*45.);
+  float det=vnoise3(q*60.);
+  vec3 alb=mix(vec3(.003,.020,.115),mix(vec3(.026,.034,.050),vec3(.060,.068,.082),det)*(1.-.4*smoothstep(.60,.68,h)),land);
+  float mu=dot(n,uSunDir);
+  vec3 l=lightDepth(n*1.0004,uSunDir);vec3 T=extinct(l.xy)*l.z;
+  vec3 direct=uSunI*T*max(mu,0.)/PI;
+  vec3 sky=uSunI*.028*smoothstep(-.12,.15,mu)*vec3(.22,.46,1.);
+  vec3 moon=vec3(.06,.10,.17)*max(dot(n,uMoon),0.)*smoothstep(.04,-.08,mu);
+  vec3 c=alb*(direct+sky+moon)+vec3(.0004,.0010,.0028);
+  // ocean glint, long and soft at grazing light
+  vec3 hv=normalize(uSunDir-rd);float nh=max(dot(n,hv),0.);const float a2=.006;
+  float Dg=a2/(PI*pow(nh*nh*(a2-1.)+1.,2.));
+  float F=.02+.98*pow(1.-max(dot(-rd,hv),0.),5.);
+  c+=(1.-land)*uSunI*T*Dg*F*max(mu,0.)*.12/max(dot(n,-rd),.25);
+  float night=smoothstep(.015,-.06,mu);
+  float cl=smoothstep(.46,.72,fbm3(q*38.+4.,3));
+  city=land*night*cl*(.15+1.6*coast)*smoothstep(.70,.615,h);
+  return c;
+}
+// thin banded clouds; returns rgb, alpha in .a
+vec4 clouds(vec3 pc,vec3 rd){
+  vec3 q=toPlanet(normalize(pc),uTheta);
+  const float ca=.906,sa=.423;                       // bands run 25 deg off the flight line
+  vec3 b=vec3(ca*q.x-sa*q.z,q.y,sa*q.x+ca*q.z);
+  float band=fbm3(vec3(b.x*9.,b.y*9.,b.z*85.)+vec3(3.,1.,8.),4);
+  float region=smoothstep(.42,.62,fbm3(q*5.+vec3(11.,2.,6.),3));
+  float a=smoothstep(.55,.72,band)*region*.75;
+  if(a<.002)return vec4(0.);
+  float mu=dot(normalize(pc),uSunDir);
+  vec3 l=lightDepth(pc,uSunDir);vec3 T=extinct(l.xy)*l.z;
+  float ph=.6+.8*pow(max(dot(rd,uSunDir),0.),6.);   // forward-scatter brightening toward the sun
+  vec3 c=vec3(.50,.55,.63)*(uSunI*T*max(mu+.06,0.)*ph/PI+uSunI*.010*smoothstep(-.1,.15,mu)*vec3(.3,.5,1.));
+  c+=vec3(.06,.10,.17)*.5*max(dot(normalize(pc),uMoon),0.)*smoothstep(.04,-.08,mu)+vec3(.0006,.0012,.003);
+  return vec4(c,a);
+}
+// aurora curtains: a fold-rich oval around uPole, marched through a thin shell
+vec3 aurora(vec3 ro,vec3 rd,float tmax){
+  vec2 s1=sphereHit(ro,rd,1.030);if(s1.y<0.)return vec3(0.);
+  vec2 s0=sphereHit(ro,rd,1.006);
+  float t0=max(s1.x,0.),t1=min(s1.y,tmax);
+  if(s0.x>0.)t1=min(t1,s0.x);
+  if(t1<=t0)return vec3(0.);
+  vec3 P=uPole,E1=normalize(cross(P,vec3(0,1,0))),E2=cross(P,E1);
+  vec3 acc=vec3(0.);const int N=14;float dt=(t1-t0)/float(N);
+  for(int i=0;i<N;i++){
+    vec3 p=ro+rd*(t0+dt*(float(i)+.5));float r=length(p),h=r-1.;
+    vec3 d=toPlanet(p/r,uTheta*.3);
+    float g=acos(clamp(dot(d,P),-1.,1.));
+    float lon=atan(dot(d,E2),dot(d,E1));
+    float edge=.155+.012*sin(lon*9.+uTime*.12)+.008*sin(lon*23.-uTime*.2)+.010*(vnoise2(vec2(lon*30.,uTime*.08))-.5);
+    float x=(g-edge)/.0035;
+    float sheet=exp(-x*x)+.35*exp(-pow((g-edge-.012)/.006,2.));
+    float rays=.55+.45*vnoise2(vec2(lon*420.,uTime*.25+h*30.));
+    float green=smoothstep(.006,.0085,h)*exp(-max(h-.0085,0.)/.006);
+    float red=smoothstep(.012,.018,h)*exp(-max(h-.018,0.)/.008);
+    acc+=(vec3(.20,1.,.48)*green+vec3(.9,.25,.45)*.30*red)*sheet*rays*dt;
+  }
+  return acc*uBreath*14.;
+}
+void main(){
+  vec2 p=pix();vec3 rd=normalize(p.x*uCamR+p.y*uCamU+uFocal*uCamF);vec3 ro=uCamPos;
+  vec3 col=vec3(0.);float city=0.,tmax=1e4;
+  // sub-pixel limb coverage: distance of the ray's closest approach from the surface, in pixels
+  float b=-dot(ro,rd);vec3 cp=ro+rd*b;float r0=length(cp);
+  float pw=length(fwidth(rd))*b;
+  float cov=clamp(.5+(1.-r0)/pw,0.,1.);
+  vec2 hp=sphereHit(ro,rd,1.);
+  if(cov>0.){
+    vec3 n=hp.x>0.?normalize(ro+rd*hp.x):normalize(cp);
+    tmax=hp.x>0.?hp.x:b;col=ground(n,rd,city);
+    vec2 hc=sphereHit(ro,rd,RC);
+    if(hc.x>0.){vec4 cl=clouds(ro+rd*hc.x,rd);col=mix(col,cl.rgb,cl.a);city*=1.-cl.a*.9;}
+  }
+  vec3 tr=vec3(1.);
+  if(cov>0.){vec3 ins=atmo(ro,rd,tmax,tr);col=col*tr+ins*uHaze*vec3(.55,.78,1.25);}
+  if(cov<1.){vec3 tr2;vec3 sky=atmo(ro,rd,1e4,tr2)*.72;col=mix(sky,col,cov);city*=cov;}
+  if(p.x<.25)col+=aurora(ro,rd,tmax)*tr;
+  outColor=vec4(col,city);
+}`;
+
+// ------------------------------------------------------------------ composite (full res)
+const COMPOSITE = GLSL + COMMON + `
+uniform sampler2D uScene;
+uniform vec3 uSunDir;
+uniform vec2 uSunScr;
+uniform float uExpo,uFade;
+const float HR=.0017;const vec3 BR=vec3(30.,70.,172.);
+vec3 stars(vec3 rd,float fwr){
+  vec3 acc=vec3(0.);
+  for(int l=0;l<2;l++){
+    float F=l==0?190.:430.;
+    vec3 g=rd*F,c=floor(g),f=g-c;
+    vec3 h=hash33(c+float(l)*31.7);
+    if(h.x>(l==0?.07:.022))continue;
+    vec3 d=f-(.2+.6*hash33(c+7.3));
+    float sig=max(fwr*F*.9,.04);
+    float b=(l==0?.5:.3)*(.10+pow(h.y,6.)*4.)*(.02*.02)/(sig*sig+.0004)*6.;
+    acc+=mix(vec3(.72,.82,1.),vec3(1.,.88,.72),h.z)*b*exp(-dot(d,d)/(2.*sig*sig));
+  }
+  return acc;
+}
+vec3 extinctRay(float r0){return exp(-BR*2.*HR*exp(-(r0-1.)/HR)*sqrt(PI*r0/(2.*HR)));}
+void main(){
+  vec2 p=pix();vec2 uv=gl_FragCoord.xy/uRes;
+  vec3 rd=normalize(p.x*uCamR+p.y*uCamU+uFocal*uCamF);vec3 ro=uCamPos;
+  float fwr=length(fwidth(rd));
+  vec4 sc=texture(uScene,uv);
+  vec3 col=sc.rgb+(textureLod(uScene,uv,3.).rgb*.55+textureLod(uScene,uv,5.).rgb*.35+textureLod(uScene,uv,6.5).rgb*.10)*.07;
+  vec2 hp=sphereHit(ro,rd,1.);
+  if(hp.x>0.){
+    float m=sc.a;
+    if(m>.002){
+      vec3 n=normalize(ro+rd*hp.x),q=toPlanet(n,uTheta);
+      float cosv=max(dot(n,-rd),.06);
+      float cs=0.;
+      for(int k=0;k<3;k++){
+        float F=k==0?520.:(k==1?1400.:3600.);vec3 g=q*F,c=floor(g),f=g-c;
+        vec3 h=hash33(c+float(k)*13.1);
+        if(h.x<(k==0?.6:(k==1?.45:.3))){
+          vec3 d=f-(.25+.5*hash33(c+5.1));
+          float fp=fwr*hp.x*F;                       // pixel footprint in cell units
+          float sig=max(fp*(.35+.35/cosv),.035);
+          cs+=(k==0?1.:(k==1?.6:.35))*(.3+pow(h.z,3.)*2.)*(.035*.035)/(sig*sig+.0002)*exp(-dot(d,d)/(2.*sig*sig));
+        }
+      }
+      col+=vec3(1.,.58,.24)*m*(cs*3.4+.04);
+    }
+  }else{
+    float b=-dot(ro,rd);float r0=length(ro+rd*max(b,0.));
+    col+=stars(rd,fwr)*extinctRay(r0)*(1.-clamp(luma(sc.rgb)*8.,0.,1.));
+  }
+  // off-frame sun: soft veiling glare from the right edge (lens, not sky)
+  vec2 d=p-uSunScr;float dl=length(d);
+  col+=vec3(1.,.78,.52)*(.020/(1.+pow(dl/.25,2.)))+vec3(.5,.7,1.)*.006*exp(-pow(d.y/.03,2.))*exp(-abs(d.x)*2.2);
+  col*=uExpo;
+  vec2 vq=uv-.5;col*=1.-.30*dot(vq,vq)*1.6;
+  col=srgb(aces(col));
+  outColor=vec4(dither(col)*uFade,1.);
+}`;
+
+// ------------------------------------------------------------------ timeline (closed form)
+const FOCAL = 1.35, ALT = 0.045, OMEGA = 0.024, T_LIGHT = 9.0, AZ = 28 * Math.PI / 180;
+const rx = (v, th) => { const c = Math.cos(th), s = Math.sin(th); return [v[0], v[1] * c + v[2] * s, -v[1] * s + v[2] * c]; };
+const MOON = V.norm([-0.5, 0.8, 0.3]);
+// auroral oval centre: 0.55 rad from the nadir, bearing 40 deg left of the flight line
+const POLE = [Math.sin(0.55) * Math.sin(-0.70), Math.cos(0.55), Math.sin(0.55) * Math.cos(-0.70)];
+const breath = t => 0.35 + [1.9, 4.7, 7.6].reduce((s, tk, i) => s + [0.55, 0.8, 0.6][i] * Math.exp(-Math.pow((t - tk) / 1.0, 2)), 0);
+function camera(t) {
+  const pos = [0, 1 + ALT, 0], dip = Math.acos(1 / (1 + ALT));
+  const pd = dip + Math.atan(0.17 / FOCAL) + 0.004 * Math.sin(t * 0.5);
+  const yaw = 0.05 - 0.02 * smoother(lin(t, 0, 10));
+  const roll = 0.045 - 0.02 * smoother(lin(t, 0, 10));
+  let F = [Math.sin(yaw) * Math.cos(pd), -Math.sin(pd), Math.cos(yaw) * Math.cos(pd)];
+  let U = V.norm(V.sub([0, 1, 0], V.mul(F, V.dot([0, 1, 0], F))));
+  let R = V.cross(U, F);
+  const R2 = V.add(V.mul(R, Math.cos(roll)), V.mul(U, Math.sin(roll)));
+  U = V.cross(F, R2);
+  return { pos, F, R: R2, U };
+}
+// Solve the sun's starting elevation so that sunlight reaches the ground at the bottom centre of
+// the frame exactly at T_LIGHT (n . S = 0 there).
+const sunAt = (e0, t) => rx([Math.cos(e0) * Math.cos(AZ), Math.sin(e0), Math.cos(e0) * Math.sin(AZ)], OMEGA * t);
+function groundUnder(c, x, y) {
+  const rd = V.norm(V.add(V.add(V.mul(c.R, x), V.mul(c.U, y)), V.mul(c.F, FOCAL)));
+  const b = V.dot(c.pos, rd), h = b * b - (V.dot(c.pos, c.pos) - 1);
+  return V.norm(V.add(c.pos, V.mul(rd, -b - Math.sqrt(Math.max(h, 0)))));
+}
+const E0 = (() => {
+  const n = groundUnder(camera(T_LIGHT), 0, -0.5); let lo = -0.6, hi = 0.3;
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (V.dot(n, sunAt(m, T_LIGHT)) < 0) lo = m; else hi = m; }
+  return (lo + hi) / 2;
+})();
+const S0 = sunAt(E0, 0);
+function uniforms(t) {
+  const c = camera(t), th = OMEGA * t, S = rx(S0, th);
+  const sf = V.dot(S, c.F);
+  return {
+    uCamPos: c.pos, uCamR: c.R, uCamU: c.U, uCamF: c.F, uFocal: FOCAL, uTheta: th,
+    uSunDir: S, uSunI: 22, uHaze: 0.12, uMoon: MOON, uPole: POLE, uBreath: breath(t),
+    uSunScr: [FOCAL * V.dot(S, c.R) / sf, FOCAL * V.dot(S, c.U) / sf],
+    uExpo: 1.3,
+    uFade: smooth(lin(t, 0, 0.7)) * (1 - smooth(lin(t, 9.35, 9.97))),
+  };
+}
+
+// ------------------------------------------------------------------ score: low drone
+async function score(S) {
+  const { ctx, bell, pad, noise, osc, curve, reverb } = S;
+  const hall = reverb(5.0, 41, { decay: 4.2, pre: 0.03, dark: 0.7 }, 0.5);
+  const tone = (f, pts, { pan = 0, type = 'sine', det = 0, send = hall, sendAmt = 0.3 } = {}) => {
+    const g = ctx.createGain(); curve(g.gain, pts);
+    const p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(S.master);
+    if (send) { const sg = ctx.createGain(); sg.gain.value = sendAmt; g.connect(sg); sg.connect(send); }
+    osc(type, f, pts[0][0], pts[pts.length - 1][0] + 0.02, g, det); return g;
+  };
+  // the drone: D1 + A1 sub, slow-beating pair, swelling with the aurora breaths
+  const br = t => breath(t);
+  const env = (a, extra = []) => [[0, 0], [1.2, a], ...extra, [8.6, a * 1.05], [9.75, 0]];
+  tone(36.71, env(0.30));
+  tone(36.71, env(0.10), { det: 9 });
+  tone(55.0, env(0.13), { pan: 0.1 });
+  // dark saw body through a low-pass that opens when the light lands
+  pad({ notes: [73.42, 110.0, 146.83], env: [[0, 0], [2.0, 0.6], [8.2, 0.75], [9.0, 0.9], [9.8, 0]], cutoff: [[0, 160], [6.0, 260], [8.4, 330], [9.2, 900, 'e'], [9.8, 500]], amp: 0.11, spread: 0.5, detune: 5, send: hall, sendAmt: 0.35 });
+  // breathing harmonic: a band of overtones whose level follows the aurora
+  const pts = []; for (let t = 0.2; t <= 9.6; t += 0.2) pts.push([t, 0.022 * (br(t) - 0.3) * smooth(lin(t, 0.2, 1.5)) * (1 - smooth(lin(t, 9.0, 9.6)))]);
+  tone(220.0, pts, { pan: -0.35, sendAmt: 0.8 });
+  tone(330.0, pts.map(([t, v]) => [t, v * 0.6]), { pan: -0.5, det: 4, sendAmt: 0.9 });
+  tone(440.0, pts.map(([t, v]) => [t, v * 0.35]), { pan: -0.6, det: -3, sendAmt: 1.0 });
+  // aurora shimmer: very quiet high partials, left, on each breath
+  [[1.9, 0.6], [4.7, 1.0], [7.6, 0.7]].forEach(([tk, a], i) => {
+    for (const [f, pn, d] of [[1760, -0.6, 0], [2217.46, -0.45, 3], [2637.02, -0.7, -2]]) tone(f, [[tk - 1.2, 0], [tk, 0.0045 * a], [tk + 1.3, 0]], { pan: pn, det: d + i, sendAmt: 1.4 });
+  });
+  // orbital air: dark, slow noise bed and a faint high hiss for the cloud bands
+  noise({ t0: 0, t1: 9.8, seed: 7, color: 'brown', type: 'lowpass', freq: [[0, 300], [9.8, 420]], q: 0.5, gain: [[0, 0], [1.5, 0.10], [8.5, 0.12], [9.8, 0]], pan: [[0, -0.2], [9.8, 0.2]] });
+  noise({ t0: 2.5, t1: 9.6, seed: 9, color: 'pink', type: 'bandpass', freq: [[2.5, 2600], [9.0, 4200]], q: 0.9, gain: [[2.5, 0], [5.5, 0.020], [8.0, 0.028], [9.6, 0]], pan: [[2.5, 0.5], [9.6, 0.1]], send: hall, sendAmt: 0.4 });
+  // first light on the ground: F#2 / F#3 overtone and an A bloom, warm and slow
+  tone(92.5, [[8.2, 0], [9.0, 0.10], [9.75, 0]], { pan: 0.15, sendAmt: 0.5 });
+  tone(185.0, [[8.4, 0], [9.1, 0.045], [9.75, 0]], { pan: 0.35, sendAmt: 0.7 });
+  tone(277.18, [[8.6, 0], [9.2, 0.020], [9.75, 0]], { pan: 0.45, det: 2, sendAmt: 0.9 });
+  bell({ t: 8.95, f: 739.99, amp: 0.035, pan: 0.4, partials: [[1, 0.6, 0.9], [2.0, 0.2, 0.5], [2.76, 0.1, 0.3]], attack: 0.03, send: hall, sendAmt: 0.9, dur: 0.75 });
+  curve(S.master.gain, [[0, 1], [9.0, 1], [9.72, 0]]);
+}
+
+OrbitKit.film({ duration: D, poster: 4.7, sceneScale: 0.5, scene: SCENE, composite: COMPOSITE, uniforms, score });
+</script>
+</body></html>

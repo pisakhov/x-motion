@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, validateMotion, frameTimes, resolveAsset, startServer, prepareOutput } from '../scripts/render.mjs';
+import { parseArgs, validateMotion, frameTimes, resolveAsset, startServer, prepareOutput, wavFile, parseLoudness } from '../scripts/render.mjs';
 import { validateFrontmatter, localReferences, extractMotion, check } from '../scripts/check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,6 +19,39 @@ test('CLI accepts storyboard default, video and help without loading Playwright'
   assert.equal(parseArgs(['--video', '--out', 'renders/demo', 'scene.html']).video, true);
   assert.deepEqual(parseArgs(['--help']), { help: true });
   for (const args of [[], ['scene.html'], ['scene.html', '--out'], ['scene.html', '--out', '--video'], ['scene.txt', '--out', 'out'], ['scene.html', '--out', 'out', '--bad'], ['scene.html', '--out', 'out', '--video', '--video'], ['scene.html', '--out', 'out', '--out', 'again'], ['scene.html', 'another.html', '--out', 'out']]) assert.throws(() => parseArgs(args));
+});
+
+test('CLI accepts audio export and bounded explicit storyboard times', () => {
+  assert.deepEqual(parseArgs(['a.html', '--out', 'o', '--audio', '--times', '0,1.5,2.25']), { video: false, input: 'a.html', out: 'o', audio: true, times: [0, 1.5, 2.25] });
+  for (const times of ['', '1,,2', '-1', 'a', '1e3', Array.from({ length: 61 }, (_, i) => i).join(',')]) assert.throws(() => parseArgs(['a.html', '--out', 'o', '--times', times]), times);
+  assert.throws(() => parseArgs(['a.html', '--out', 'o', '--audio', '--audio']));
+});
+
+test('poster time is optional and must fall inside the film', () => {
+  assert.deepEqual(validateMotion({ ...motion, poster: 1.25 }), { ...motion, poster: 1.25 });
+  for (const poster of [-0.1, 2, NaN, '1']) assert.throws(() => validateMotion({ ...motion, poster }), String(poster));
+});
+
+test('WAV writer emits a canonical 16-bit PCM header', () => {
+  const pcm = Buffer.alloc(8);
+  pcm.writeInt16LE(32767, 0); pcm.writeInt16LE(-32768, 2);
+  const wav = wavFile(pcm, 2, 48000);
+  assert.equal(wav.length, 52);
+  assert.equal(wav.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(wav.readUInt32LE(4), 44);
+  assert.equal(wav.readUInt16LE(22), 2);
+  assert.equal(wav.readUInt32LE(24), 48000);
+  assert.equal(wav.readUInt32LE(28), 192000);
+  assert.equal(wav.readUInt32LE(40), 8);
+  assert.deepEqual(wav.subarray(44), pcm);
+  assert.throws(() => wavFile(Buffer.alloc(6), 2, 48000));
+  assert.throws(() => wavFile(Buffer.alloc(8), 3, 48000));
+});
+
+test('loudness parser reads only the final ebur128 summary', () => {
+  const summary = 'I: -40.0 LUFS\n[Parsed_ebur128_0] Summary:\n\n  Integrated loudness:\n    I:         -18.2 LUFS\n\n  Loudness range:\n    LRA:         3.1 LU\n\n  True peak:\n    Peak:       -2.3 dBFS\n';
+  assert.deepEqual(parseLoudness(summary), { integratedLufs: -18.2, loudnessRangeLu: 3.1, truePeakDbfs: -2.3 });
+  assert.deepEqual(parseLoudness('Summary:\n I:         -70.0 LUFS\n LRA: 0.0 LU\n Peak: -inf dBFS'), { integratedLufs: -70, loudnessRangeLu: 0, truePeakDbfs: null });
 });
 
 test('renderer navigation explicitly enables composition render mode (source contract)', async () => {
@@ -95,23 +128,45 @@ test('skill frontmatter and local references are checked without YAML execution'
 
 test('static metadata extraction rejects JavaScript expressions instead of executing them', () => {
   assert.deepEqual(extractMotion('window.motion = { width: 1280, height: 720, duration: 2, fps: 24 };'), motion);
+  assert.deepEqual(extractMotion('window.motion = { width: 1280, height: 720, duration: 2, fps: 24, poster: 1.5 };'), { ...motion, poster: 1.5 });
+  assert.throws(() => extractMotion('window.motion = { width: 1280, height: 720, duration: 2, fps: 24, poster: 2 };'));
   for (const html of ['window.motion = foo()', 'window.motion = { width: alert(1) }', 'window.motion = {width:1280,width:720,height:720,duration:2,fps:24}']) assert.throws(() => extractMotion(html));
 });
 
-test('repository checker validates references, examples, brief and metadata consistency', async t => {
+test('repository checker validates every skill, kit-based compositions and catalog sources', async t => {
   const directory = await fixture(t);
-  const skill = path.join(directory, 'skills/x-motion');
-  const example = path.join(directory, 'examples/demo');
-  await fs.mkdir(path.join(skill, 'references'), { recursive: true });
-  await fs.mkdir(example, { recursive: true });
-  await fs.writeFile(path.join(skill, 'SKILL.md'), '---\nname: x-motion\ndescription: Motion craft\n---\n[Guide](references/guide.md)');
-  await fs.writeFile(path.join(skill, 'references/guide.md'), 'Guide');
-  await fs.writeFile(path.join(example, 'index.html'), `window.motion = ${JSON.stringify(motion)}; window.renderFrame = () => {};`);
-  await fs.writeFile(path.join(example, 'brief.md'), '# A deliberate visual thesis');
-  assert.equal((await check(directory)).examples.length, 1);
-  await fs.writeFile(path.join(example, 'metadata.json'), JSON.stringify({ ...motion, fps: 30 }));
-  await assert.rejects(check(directory), /disagree/);
-  await fs.unlink(path.join(example, 'metadata.json'));
-  await fs.unlink(path.join(example, 'brief.md'));
-  await assert.rejects(check(directory), /brief/);
+  const writeSkill = async (name, body = '') => {
+    await fs.mkdir(path.join(directory, 'skills', name, 'references'), { recursive: true });
+    await fs.writeFile(path.join(directory, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: Motion craft\n---\n${body}`);
+  };
+  await writeSkill('x-motion', '[Guide](references/guide.md)');
+  await fs.writeFile(path.join(directory, 'skills/x-motion/references/guide.md'), 'Guide');
+  await writeSkill('x-motion-demo');
+  await fs.mkdir(path.join(directory, 'examples/demo'), { recursive: true });
+  await fs.mkdir(path.join(directory, 'data'));
+  await fs.mkdir(path.join(directory, 'scripts'));
+  await fs.writeFile(path.join(directory, 'scripts/site-pages.mjs'), 'export {};');
+  await fs.writeFile(path.join(directory, 'examples/demo/a.html'), `window.motion = ${JSON.stringify(motion)}; window.renderFrame = () => {};`);
+  await fs.writeFile(path.join(directory, 'examples/demo/kit.js'), 'window.motion = make(); window.renderFrame = t => t;');
+  await fs.writeFile(path.join(directory, 'examples/demo/b.html'), '<script src="kit.js"></script>');
+  const catalog = record => JSON.stringify({ version: 2, themes: [{ slug: 'demo', skill: 'x-motion-demo' }], motions: [record] });
+  const film = { id: 'XM-0001', status: 'review', source: 'examples/demo/a.html', skills: ['x-motion', 'x-motion-demo'], ...motion };
+  await fs.writeFile(path.join(directory, 'data/catalog.json'), catalog(film));
+  const result = await check(directory);
+  assert.deepEqual(result.skills.map(skill => skill.name), ['x-motion', 'x-motion-demo']);
+  assert.deepEqual(result.examples.map(example => [example.name, example.motion?.fps ?? null]), [['demo/a.html', 24], ['demo/b.html', null]]);
+  await fs.writeFile(path.join(directory, 'data/catalog.json'), catalog({ ...film, duration: 3 }));
+  await assert.rejects(check(directory), /duration disagrees/);
+  await fs.writeFile(path.join(directory, 'data/catalog.json'), catalog({ ...film, source: 'examples/demo/missing.html' }));
+  await assert.rejects(check(directory), /not an example composition/);
+  await fs.writeFile(path.join(directory, 'data/catalog.json'), catalog({ ...film, status: 'discarded', source: 'examples/demo/missing.html' }));
+  assert.equal((await check(directory)).examples.length, 2);
+  await writeSkill('x-motion-demo', 'Light \u2014 shade');
+  await assert.rejects(check(directory), /em dash/);
+  await writeSkill('x-motion-demo');
+  await fs.writeFile(path.join(directory, 'skills/x-motion-demo/SKILL.md'), '---\nname: other\ndescription: Motion craft\n---\n');
+  await assert.rejects(check(directory), /frontmatter name/);
+  await writeSkill('x-motion-demo');
+  await fs.writeFile(path.join(directory, 'examples/demo/kit.js'), 'window.motion = make();');
+  await assert.rejects(check(directory), /renderFrame/);
 });

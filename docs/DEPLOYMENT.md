@@ -30,14 +30,13 @@ npm run test:gallery
 docker build -t x-motion-gallery:local .
 ```
 
-The build reads `data/catalog.json`, validates digests, and copies only non-discarded assets and allowlisted public metadata to `dist/`. Feedback events never enter `dist/`. The container uses digest-pinned Node (build only) and unprivileged Nginx. No browser, npm dependencies, working frames or source examples ship in the runtime. Nginx serves byte-range MP4 requests and a `/healthz` endpoint; media IDs use immutable caching, while metadata and HTML revalidate.
+The build reads `data/catalog.json` and `skills/`, validates digests, and writes the static pages, raw skill Markdown, non-discarded assets and allowlisted public metadata to `dist/`. Feedback events never enter `dist/`. The container uses digest-pinned Node (build only) and unprivileged Nginx. No browser, npm dependencies, working frames or source examples ship in the runtime. Nginx serves byte-range MP4 requests, `text/markdown` skills, a branded `404.html`, relative directory redirects and a `/healthz` endpoint; media IDs use immutable caching, while metadata, fonts and HTML revalidate. The CSP allows only same-origin scripts, styles, fonts and media.
 
 After merging, queue the compose deployment through Dokploy, verify an actual deployment row reaches `done`, then verify public HTTPS health, catalog identity, media digests, byte-range responses and browser behavior:
 
 ```sh
+GALLERY_URL=https://x-motion.187.77.218.3.sslip.io npm run test:http
 GALLERY_URL=https://x-motion.187.77.218.3.sslip.io npm run test:gallery
-curl --fail https://x-motion.187.77.218.3.sslip.io/healthz
-curl -I -H 'Range: bytes=0-31' https://x-motion.187.77.218.3.sslip.io/media/XM-0001.mp4
 ```
 
 Keep deployments sequential. A queued response is not proof of deployment; a healthy page is not aesthetic approval. Retain the previous reviewed commit as the rollback source and explicitly redeploy it if needed. Do not overwrite permanent-ID assets for a visual correction: publish a new linked ID instead.

@@ -5,6 +5,10 @@
 !scripts/
 !scripts/catalog.mjs
 !scripts/build-site.mjs
+!scripts/markdown.mjs
+!scripts/site-pages.mjs
+!skills/
+!skills/**
 !data/
 !data/catalog.json
 !site/

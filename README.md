@@ -1,22 +1,24 @@
 # X Motion
 
-**A motion-design skill, not a template factory.**
+**Short films made by coding agents, published with the prompt and the skill behind each one.**
 
-Give a capable coding agent a brief, a point of view and a real render/review loop. Get editable scene code, a storyboard, a timed film and an honest account of what was verified.
+Give a capable agent a brief, a point of view and a real render and review loop. Get editable scene code, a storyboard, a finished film with an original synthesized score, and an honest account of what was verified.
 
-Inspired by LangChain’s [How We Built Our Design Agent](https://www.langchain.com/blog/design-agent). Original implementation; not a fork, affiliated service, or copy of their motion engine. See [provenance](docs/PROVENANCE.md).
+Inspired by LangChain's [How We Built Our Design Agent](https://www.langchain.com/blog/design-agent). Original implementation; not a fork, affiliated service, or copy of their motion engine. See [provenance](docs/PROVENANCE.md).
 
-## Watch and shape the collection
+## The gallery
 
-**[Open the motion gallery](https://x-motion.187.77.218.3.sslip.io)** — a lightweight Dokploy-hosted showcase, not a new agent application.
+**[Open the gallery](https://x-motion.187.77.218.3.sslip.io)**. It is a static, multi-page site organized by theme:
 
-Every published film has a permanent ID. Tell X in chat, for example: **“XM-0002 — keep the cobalt, slow the final reveal.”** The gallery's copy buttons prepare an ID or feedback template; they do not save feedback themselves.
+| Theme | Skill | Idea |
+| --- | --- | --- |
+| Orbit | [`x-motion-orbit`](skills/x-motion-orbit/SKILL.md) | Titanium, starlight and the curve of the Earth. |
+| Prism | [`x-motion-prism`](skills/x-motion-prism/SKILL.md) | Light, glass and colour at rest. |
+| Sumi | [`x-motion-sumi`](skills/x-motion-sumi/SKILL.md) | Ink, paper and breath. |
 
-- `XM-0001` — **First Light**, 6s, original sound.
-- `XM-0002` — **Signal Weave**, 7s, silent.
-- `XM-0003` — **Weight of Type**, 7s, silent.
+Every film page shows the exact prompt that started it, the skills that shaped it, the model that wrote it and a link to its source. Every skill opens as a readable page with **Copy Markdown** and **Download**, so you can paste it into any agent. The raw files are served at `/skills/<name>/SKILL.md`.
 
-All begin in **Review**, not approved. Improvements get new IDs linked to their parents. Discarded studies leave the deployed collection but remain in source history. See [the feedback workflow](docs/FEEDBACK.md) and [deployment](docs/DEPLOYMENT.md).
+Each film has a permanent ID such as `XM-0004`. Tell X in chat, for example: "XM-0004: keep the flare, slow the planet rise." Revisions get new IDs linked to their parents. Discarded films leave the deployed gallery but remain in source history. See [the feedback workflow](docs/FEEDBACK.md) and [deployment](docs/DEPLOYMENT.md).
 
 ```sh
 npm run catalog -- list
@@ -25,23 +27,22 @@ npm run build:site
 npm run test:gallery
 ```
 
-Small published MP4/poster snapshots in `gallery-media/` are deliberately tracked and hash-checked so deployment reproduces the exact reviewed video. Working frames and intermediate renders remain ignored. Private feedback must never be committed to this public repository.
+Published MP4, poster and preview snapshots in `gallery-media/` are tracked and hash-checked so deployment reproduces exactly the reviewed films. Working frames and intermediate renders stay ignored. Private feedback is never committed to this public repository.
 
-## The skill
+## The skills
 
-Start with [`skills/x-motion/SKILL.md`](skills/x-motion/SKILL.md). It routes small refinements differently from new films, then loads only the craft references the job needs.
+Start with [`skills/x-motion/SKILL.md`](skills/x-motion/SKILL.md), the core method. It routes small refinements differently from new films, then loads only the craft references the job needs. Each theme skill extends it with a palette, light and material rules, motion vocabulary, a sound palette with mixing targets, technique recipes and a list of things to avoid.
 
 - **Direction before decoration.** A specific visual thesis, not a collection of fashionable effects.
-- **Storyboard → animatic → production.** Inspect actual renders before spending on polish.
-- **Motion has intent.** Timing, camera, typography, material and sound support the message.
-- **Quality is reviewed, not declared.** Technical checks cannot certify taste. No invented aesthetic scores.
-- **Models get creative freedom.** Principles and critique, not 115 compulsory layout presets.
+- **Storyboard, animatic, production.** Inspect real renders before spending on polish.
+- **Motion has intent.** Timing, camera, material and sound support the message.
+- **Quality is reviewed, not declared.** Technical checks cannot certify taste.
 
-Opus 5.5 is the recommended creative author for this project, not a hard-coded dependency. Select it in your agent host; the skill cannot switch models or grant permissions. Other capable coding models can use the same workflow. No model API calls or keys are required by this repository.
+Opus 5.5 is the recommended creative author for this project, not a hard-coded dependency. The skills cannot switch models or grant permissions, and no model API calls or keys are required by this repository.
 
 ## Install into your agent
 
-Clone the **whole repository**, so supporting tools and references remain available:
+Clone the **whole repository** so the renderer and references stay available:
 
 ```sh
 git clone https://github.com/pisakhov/x-motion.git
@@ -50,53 +51,54 @@ npm ci
 npx playwright install chromium
 ```
 
-Install Node.js 22+ and FFmpeg separately. On a minimal Linux machine, Chromium may also require OS libraries (`npx playwright install-deps chromium`; inspect before running with elevated privileges).
+Install Node.js 22+ and FFmpeg separately. On a minimal Linux machine, Chromium may also need OS libraries (`npx playwright install-deps chromium`; inspect before running with elevated privileges).
 
-For Pi, link the skill into its discovery directory (the command refuses to replace an existing path):
+For Pi, link the skills into its discovery directory (the command refuses to replace an existing path):
 
 ```sh
 mkdir -p ~/.pi/agent/skills
-ln -s "$PWD/skills/x-motion" ~/.pi/agent/skills/x-motion
+for skill in skills/*/; do ln -s "$PWD/$skill" ~/.pi/agent/skills/; done
 ```
 
-Run `/reload`, then `/skill:x-motion Create a six-second launch ident for…`.
+Run `/reload`, then `/skill:x-motion-orbit Create a ten-second film of…`. For Claude Code or another Agent Skills host, link the same directories into its skill location, or ask the agent to read the Markdown directly.
 
-For Claude Code or another Agent Skills host, link the same directory into that host’s supported skill location, or ask the agent to read `skills/x-motion/SKILL.md` directly. Keep the repository checkout available. The Markdown instructions are portable; the bundled renderer is optional.
-
-## Run the original example
-
-**First Light** is a six-second study, not a universal house style. Its [brief](examples/first-light/brief.md) records the intent, shot timing and provenance. Do not recycle its look for unrelated briefs.
+## Render a film
 
 ```sh
 npm run check
 npm test
-npm run storyboard
-npm run render
+node scripts/render.mjs examples/orbit/passage.html --out renders/passage-board --audio
+node scripts/render.mjs examples/orbit/passage.html --out renders/passage --video
 ```
 
-Outputs go to ignored `renders/` directories. Use a fresh `--out` path for each revision; existing outputs are not silently overwritten. The renderer exports a **silent** MP4, storyboard PNGs and a machine-readable manifest. Original optional sound design is documented in [the example guide](docs/FIRST_LIGHT.md).
+A storyboard writes five PNG stills and `manifest.json`; `--times 0.5,2,4.25` picks the stills and `--audio` adds `sound.wav` with loudness figures. `--video` also writes every frame, `poster.webp` and `film.mp4` with the score muxed as AAC. Use a fresh `--out` path for each revision; outputs are never silently overwritten.
+
+To publish a render, write a spec with the source, theme, slug, title, description, prompt, skills and model, then:
+
+```sh
+npm run catalog -- add --render renders/passage --spec spec.json
+```
+
+This copies the verified film and poster under the next permanent ID, makes a muted 960 px preview loop, and records the film in **Review**.
 
 ### Composition contract
 
 A trusted local HTML file exposes:
 
 ```js
-window.motion = { width: 960, height: 540, duration: 6, fps: 30 };
-window.renderFrame = async (seconds) => { /* redraw the entire frame */ };
+window.motion = { width: 1920, height: 1080, duration: 9, fps: 30, poster: 7.5 };
+window.renderFrame = (seconds) => { /* redraw the entire frame from this time alone */ };
+window.renderAudio = async ({ sampleRate }) => { /* optional: return an AudioBuffer from an OfflineAudioContext */ };
 ```
 
-The renderer visits the file with `?render=1`. Disable preview playback in that mode. Frames must depend only on time and fixed assets: no accumulated simulation, wall clock or unseeded randomness. Bundle fonts/assets locally and record licenses. Playwright captures sequential frames and FFmpeg encodes H.264; no paid render service or external asset fetches.
+The renderer opens the file with `?render=1`; disable preview playback in that mode. Frames must depend only on time and fixed data: no accumulated simulation, wall clock or unseeded randomness. The renderer seeks backward to prove frame determinism, renders the score twice to prove audio determinism, and records integrated loudness, true peak and clipped samples. Playwright captures frames, FFmpeg encodes H.264; no paid render service or external asset fetches.
 
-## What this first release is—and is not
+## Scope
 
-The craft workflow is broader than the small bundled renderer. This release provides one portable skill, focused references, three original studies, a public feedback-oriented gallery, frame capture, MP4 export and tests. It does **not** reproduce LangChain’s Slack app, sandbox orchestration, reference-film library, temporal motion-blur engine or production approval service. Storyboard approval is a human workflow requirement, not a falsely advertised software lock.
+This release provides a core skill with focused references, three theme skills, nine original films, a static themed gallery, deterministic frame and audio capture, MP4 export and tests. It does **not** reproduce LangChain's Slack app, sandbox orchestration, reference-film library or production approval service. Storyboard approval is a human workflow step, not a software lock.
 
-Use another engine when the brief needs it: for example, a reviewed HyperFrames setup for editorial footage, or Three.js for genuine 3D. Read that engine’s current documentation and licenses first. Do not call Canvas shading “physically based 3D.”
-
-**Trust boundary:** render only trusted compositions. Blocking network requests is not an OS sandbox; browser code still runs locally. Never render unknown third-party HTML on a machine containing secrets. Review assets, scripts and dependencies before use.
+**Trust boundary:** render only trusted compositions. Blocking network requests is not an OS sandbox; browser code still runs locally. Never render unknown third-party HTML on a machine containing secrets.
 
 ## Verification and contribution
 
-Run `npm run check && npm test`, render the affected scenes, inspect key frames and playback, and record specific findings. Respect reduced-motion preferences in interactive previews. Film exports are inherently motion content; provide a still alternative and never autoplay sound in a webpage.
-
-Changes go through branches and review. Never equate “tests pass” with “the film is beautiful.” MIT licensed; dependencies and external assets retain their own licenses.
+Run `npm run check && npm test`, render the affected scenes, inspect key frames, play the film and listen to it, and record specific findings. Changes go through branches and review. Never equate "tests pass" with "the film is beautiful." MIT licensed; the bundled Geist fonts are under the SIL Open Font License (`site/fonts/OFL.txt`).

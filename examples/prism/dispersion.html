@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dispersion · X Motion Prism</title>
+<style>html,body{margin:0;background:#000;overflow:hidden} canvas{display:block;width:100vw;height:100vh}</style>
+</head><body>
+<script src="kit.js"></script>
+<script>
+'use strict';
+// Dispersion. A white beam grazes a paper floor, enters a flint prism, and leaves as a spectrum.
+// Optics are traced in JavaScript per frame (Snell + Cauchy per wavelength); the shader paints the
+// floor light and ray-traces the glass. Everything derives from t.
+const { clamp, mix, prog, smooth, smoother } = XM;
+const D = 9, NS = 20;
+const GLASS_A = 1.52, GLASS_B = 0.045; // Cauchy (µm²); B ≈ 4× crown glass, exaggerated so the fan reads on screen
+const nOf = nm => GLASS_A + GLASS_B / ((nm / 1000) ** 2);
+const LAMS = Array.from({ length: NS }, (_, i) => mix(395, 705, (i + 0.5) / NS));
+const gauss = (x, m, s) => Math.exp(-(((x - m) / s) ** 2));
+const spectralJS = nm => {
+  const w = clamp((nm - 372) / 38) ** 2 * (3 - 2 * clamp((nm - 372) / 38)) * (1 - smooth(clamp((nm - 660) / 52)));
+  return [(gauss(nm, 606, 46) + 0.14 * gauss(nm, 420, 22)) * w, gauss(nm, 543, 44) * w, gauss(nm, 452, 34) * w];
+};
+const COLS = (() => {
+  // spectral sharpening: push each band away from grey (clamped at zero) so the fan lands as clean colour;
+  // the per-channel normalisation below keeps the sum of all bands neutral white inside the glass
+  const c = LAMS.map(nm => { const v = spectralJS(nm), m = (v[0] + v[1] + v[2]) / 3; const o = v.map(x => Math.max(0, x + 0.2 * (x - m))); o[0] += 0.05 * gauss(nm, 402, 16); return o; }), sum = [0, 1, 2].map(k => c.reduce((s, v) => s + v[k], 0));
+  return new Float32Array(c.flatMap(v => v.map((x, k) => x / sum[k])));
+})();
+
+// ---- 2D optics on the floor plane (x right, z toward camera) ----
+const S = 1.9, H = 0.78, R = S / Math.sqrt(3), CENTER = [-1.55, -1.15];
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1]], add = (a, b) => [a[0] + b[0], a[1] + b[1]];
+const mul = (a, k) => [a[0] * k, a[1] * k], dot = (a, b) => a[0] * b[0] + a[1] * b[1];
+const norm = a => mul(a, 1 / Math.hypot(a[0], a[1])), cross = (a, b) => a[0] * b[1] - a[1] * b[0];
+function triangle(phi) {
+  const c = Math.cos(phi), s = Math.sin(phi);
+  return [[0, -R], [S / 2, R / 2], [-S / 2, R / 2]].map(([x, z]) => [CENTER[0] + x * c - z * s, CENTER[1] + x * s + z * c]);
+}
+function edges(V) {
+  const cen = mul(add(add(V[0], V[1]), V[2]), 1 / 3);
+  return [0, 1, 2].map(k => {
+    const a = V[k], b = V[(k + 1) % 3], e = sub(b, a); let n = norm([e[1], -e[0]]);
+    if (dot(n, sub(cen, a)) > 0) n = mul(n, -1);
+    return { a, b, n };
+  });
+}
+function hitEdge(E, p, d, skip) {
+  let best = null;
+  E.forEach((e, k) => {
+    if (k === skip) return;
+    const ab = sub(e.b, e.a), den = cross(d, ab); if (Math.abs(den) < 1e-9) return;
+    const ap = sub(e.a, p), t = cross(ap, ab) / den, u = cross(ap, d) / den;
+    if (t > 1e-7 && u >= 0 && u <= 1 && (!best || t < best.t)) best = { t, k, p: add(p, mul(d, t)), n: e.n };
+  });
+  return best;
+}
+function refract2(d, n, eta) { // n faces against d
+  const ci = -dot(n, d), k = 1 - eta * eta * (1 - ci * ci);
+  if (k < 0) return null;
+  return norm(add(mul(d, eta), mul(n, eta * ci - Math.sqrt(k))));
+}
+// The beam is fixed in the world: aimed at the left face of the prism at rest.
+const BEAM_DEG = 30, V0 = triangle(0.0);
+const AIM = add(mul(V0[2], 0.52), mul(V0[0], 0.48));
+const D0 = norm([1, Math.tan(-BEAM_DEG * Math.PI / 180)]);
+const SRC = sub(AIM, mul(D0, 12));
+function trace(phi) {
+  const E = edges(triangle(phi));
+  const h = hitEdge(E, SRC, D0, -1);
+  const out = { E: h.p, sIn: h.t, X: [], Do: [], Gl: [] };
+  const ci = -dot(h.n, D0), r0 = ((1 - 1.6) / (1 + 1.6)) ** 2;
+  out.refl = r0 + (1 - r0) * (1 - ci) ** 5;
+  out.dR = sub(D0, mul(h.n, 2 * dot(D0, h.n)));
+  for (const nm of LAMS) {
+    const n = nOf(nm); let d = refract2(D0, h.n, 1 / n), p = h.p, k = h.k, len = 0;
+    for (let i = 0; i < 4; i++) {
+      const x = hitEdge(E, p, d, k); len += x.t; p = x.p; k = x.k;
+      const o = refract2(d, mul(x.n, -1), n);
+      if (o) { d = o; break; }
+      d = sub(d, mul(x.n, 2 * dot(d, x.n)));
+    }
+    out.X.push(...p); out.Do.push(...d); out.Gl.push(len * n);
+  }
+  return out;
+}
+
+// Hue-preserving shoulder for coloured light: per-channel curves bleach bright bands toward white.
+// Neutral and near-neutral colours (paper, stone, graphite) keep the shared curve exactly.
+const HUE = `
+vec3 finishHue(vec3 col, vec2 frag){
+  float m = max(max(col.r, col.g), max(col.b, 1e-5)), chroma = (m - min(min(col.r, col.g), col.b))/m;
+  vec3 tm = mix(tonemap(col), col*(tonemap(vec3(m)).r/m), 0.55*smoothstep(0.12, 0.35, chroma));
+  return finish(-log(1. - min(tm, vec3(0.9999)))/1.85, frag);
+}
+`;
+const FRAG_FLOOR = `#version 300 es
+#define FANLIGHT texture(uFan, gl_FragCoord.xy/vec2(1920.,1080.)).rgb
+uniform sampler2D uFan;
+precision highp float;
+out vec4 fragColor;
+#define NS ${NS}
+uniform vec3 uCam, uTgt; uniform float uFov;
+uniform vec2 uV[3]; uniform vec2 uEN[3]; uniform float uEO[3]; uniform float uH; uniform vec3 uBC; uniform float uBR;
+uniform vec2 uS, uD0, uE, uDR; uniform float uSin, uRefl;
+uniform vec2 uX[NS]; uniform vec2 uDo[NS]; uniform float uGl[NS]; uniform vec3 uCol[NS];
+uniform float uHead, uBeam, uW0, uK, uFanSgn;
+uniform vec3 uN3;   // indices of refraction for the R, G, B view rays
+${XM.glslCommon}${HUE}
+const vec3 PAPER = vec3(0.887, 0.863, 0.815);
+const vec2 SHADOW = vec2(0.40, 0.46);    // shadow offset per unit height: key light upper left, behind
+
+float sdTri(vec2 p){ return max(max(dot(p,uEN[0])-uEO[0], dot(p,uEN[1])-uEO[1]), dot(p,uEN[2])-uEO[2]); }
+float gate(float tau){ return clamp((uHead - tau)/0.3, 0., 1.); }
+// narrow core + a wide, faint paper scatter (rational tail: cheap and soft)
+float profile(float lat, float w){ float x = lat/w; return exp(-x*x) + 0.022/(1. + x*x*0.08); }
+float cross2(vec2 a, vec2 b){ return a.x*b.y - a.y*b.x; }
+
+vec3 fanLight(vec2 P){
+  vec3 light = vec3(0.);
+  float d0 = sdTri(P);
+  vec2 dA = uDo[0], dB = uDo[NS-1];
+  float fA = dot(P - uX[0], dA), wA = uW0 + max(fA,0.)*uK;
+  float sA = cross2(dA, P - uX[0])*uFanSgn, sB = -cross2(dB, P - uX[NS-1])*uFanSgn;
+  bool inFan = fA > -0.3 && sA > -14.*wA && sB > -14.*wA;
+  if(inFan || d0 < 0.06){
+    for(int i=0;i<NS;i++){
+      vec2 X = uX[i], dir = uDo[i];
+      vec2 v = X - uE; float len = length(v); vec2 vd = v/len;
+      vec2 pe = P - uE; float g = dot(pe, vd);
+      float inside = d0 < 0.06 ? profile(abs(cross2(pe, vd)), uW0) * step(0., g) * step(g, len) * gate(uSin + g/len*uGl[i]) : 0.;
+      vec2 px = P - X; float f = dot(px, dir);
+      float w = uW0 + max(f,0.)*uK;
+      float xl = cross2(px, dir)/w;
+      float fan = (exp(-xl*xl) + 0.006/(1. + xl*xl*0.08)) * (uW0/w) * smoothstep(-0.01, 0.02, f) * gate(uSin + uGl[i] + f)
+                * (1. - 0.7*smoothstep(3.2, 8.0, f));               // crisp where it lands, soft only far out
+      light += uCol[i] * (inside + fan);
+    }
+  }
+  return light;
+}
+vec3 floorLight(vec2 P){
+  // soft daylight: a broad pool from upper left, the rest of the studio in gentle shade
+  vec2 q = (P - vec2(-4.6,-4.4))*vec2(0.75,1.0);
+  float key = exp(-dot(q,q)/34.);
+  float amb = 0.30 + 0.70*key;
+  amb *= 0.975 + 0.05*fbm3(P*0.6);                       // paper tooth, static
+  float d0 = sdTri(P);
+  float sh = 1.;
+  for(int k=1;k<=3;k++){                                   // swept, softening glass shadow
+    float f = float(k)/3.;
+    float d = sdTri(P - SHADOW*uH*f);
+    sh = min(sh, mix(0.80, 1., smoothstep(-0.04, 0.05+0.25*f, d)));
+  }
+  float ao = 1. - 0.40*exp(-max(d0,0.)/0.028);
+  float seam = 0.20*exp(-pow((sdTri(P - SHADOW*uH*0.8)+0.06)/0.045, 2.)) * step(0.,d0);
+  vec3 col = PAPER*(amb*sh*ao + seam*(0.4+key));
+
+  // ---- the beam ----
+  vec3 light = vec3(0.);
+  vec2 rp = P - uS; float a = dot(rp, uD0); float lat = abs(cross2(rp, uD0));
+  light += profile(lat, uW0) * gate(a) * step(a, uSin);
+  vec2 rr = P - uE; float ar = dot(rr, uDR);               // weak first-surface reflection
+  light += uRefl * profile(abs(cross2(rr, uDR)), uW0*1.3) * gate(uSin + ar) * step(0., ar) * exp(-ar*0.9);
+  light += FANLIGHT;
+  light += vec3(0.4)*exp(-dot(P-uE,P-uE)/0.003) * gate(uSin);   // scatter where light meets glass
+  return col + PAPER*light*uBeam*5.5;
+}
+
+vec3 camRay(vec2 frag){
+  vec3 fw = normalize(uTgt-uCam), rt = normalize(cross(fw, vec3(0,1,0))), up = cross(rt, fw);
+  vec2 uv = (frag - vec2(960.,540.))/540.;
+  return normalize(fw/tan(uFov*0.5) + rt*uv.x + up*uv.y);
+}
+#ifdef FAN_PASS
+void main(){
+  vec3 rd = camRay(gl_FragCoord.xy*2.);
+  vec2 P = (uCam + rd*(-uCam.y/rd.y)).xz;
+  fragColor = vec4(fanLight(P), 1.);
+}
+#else
+void main(){
+  vec3 rd = camRay(gl_FragCoord.xy);
+  vec2 P = (uCam + rd*(-uCam.y/rd.y)).xz;
+  fragColor = vec4(floorLight(P), 1.);
+}
+#endif
+`;
+
+const FRAG_FAN = FRAG_FLOOR.replace('#version 300 es\n', '#version 300 es\n#define FAN_PASS\n');
+const FRAG_GLASS = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+#define NS ${NS}
+uniform vec3 uCam, uTgt; uniform float uFov;
+uniform vec2 uV[3]; uniform vec2 uEN[3]; uniform float uEO[3]; uniform float uH; uniform vec3 uBC; uniform float uBR;
+uniform vec2 uS, uD0, uE, uDR; uniform float uSin, uRefl;
+uniform vec2 uX[NS]; uniform vec2 uDo[NS]; uniform float uGl[NS]; uniform vec3 uCol[NS];
+uniform float uHead, uBeam, uW0, uK, uFanSgn;
+uniform vec3 uN3;   // indices of refraction for the R, G, B view rays
+${XM.glslCommon}${HUE}
+const vec3 PAPER = vec3(0.887, 0.863, 0.815);
+const vec2 SHADOW = vec2(0.40, 0.46);    // shadow offset per unit height: key light upper left, behind
+
+float sdTri(vec2 p){ return 0.; }
+uniform sampler2D uFloor;
+vec3 floorAt(vec2 P){
+  vec3 fw = normalize(uTgt-uCam), rt = normalize(cross(fw, vec3(0,1,0))), up = cross(rt, fw);
+  vec3 v = vec3(P.x, 0., P.y) - uCam; float z = dot(v, fw);
+  vec2 uv = vec2(dot(v,rt), dot(v,up))/z/tan(uFov*0.5);
+  return texture(uFloor, (uv*540. + vec2(960.,540.))/vec2(1920.,1080.)).rgb;
+}
+vec3 camRay(vec2 frag){
+  vec3 fw = normalize(uTgt-uCam), rt = normalize(cross(fw, vec3(0,1,0))), up = cross(rt, fw);
+  vec2 uv = (frag - vec2(960.,540.))/540.;
+  return normalize(fw/tan(uFov*0.5) + rt*uv.x + up*uv.y);
+}
+vec3 env(vec3 d){
+  float up = clamp(d.y*0.5+0.5, 0., 1.);
+  vec3 c = mix(vec3(0.50,0.48,0.46), vec3(0.93,0.92,0.90), smoothstep(0.35,0.8,up));
+  vec3 w = normalize(vec3(-0.55, 0.62, -0.56));             // one large soft window, upper left
+  c += vec3(1.6,1.58,1.52) * smoothstep(0.87, 0.95, dot(d, w));
+  return c;
+}
+void plane(int k, out vec3 N, out float off){
+  if(k<3){ N = vec3(uEN[k].x, 0., uEN[k].y); off = uEO[k]; }
+  else if(k==3){ N = vec3(0.,1.,0.); off = uH; } else { N = vec3(0.,-1.,0.); off = 0.; }
+}
+// convex intersection; returns entry distance and face id (-1 if missed)
+float hitPrism(vec3 ro, vec3 rd, out vec3 nN, out int face){
+  float tN = -1e9, tF = 1e9; face = -1; nN = vec3(0.);
+  for(int k=0;k<5;k++){
+    vec3 N; float off; plane(k, N, off);
+    float den = dot(N, rd), dist = off - dot(N, ro);
+    if(abs(den)<1e-7){ if(dist<0.) { face=-1; return 1e9; } continue; }
+    float t = dist/den;
+    if(den<0.){ if(t>tN){ tN=t; nN=N; face=k; } } else tF = min(tF, t);
+  }
+  if(!(tN < tF && tN > 0.)) { face = -1; return 1e9; }
+  return tN;
+}
+float exitPrism(vec3 p, vec3 d, out vec3 nX){
+  float tb = 1e9; nX = vec3(0.,-1.,0.);
+  for(int k=0;k<5;k++){
+    vec3 N; float off; plane(k, N, off);
+    float den = dot(N,d); if(den<=1e-6) continue;
+    float t = (off - dot(N,p))/den;
+    if(t>1e-5 && t<tb){ tb=t; nX=N; }
+  }
+  return tb;
+}
+float throughGlass(vec3 p, vec3 rd, vec3 nN, float n, int ch){
+  vec3 d = refract(rd, nN, 1./n);
+  float trans = 0.955;
+  for(int i=0;i<3;i++){
+    vec3 nX; float t = exitPrism(p, d, nX); p += d*t;
+    if(nX.y < -0.5) return floorAt(p.xz)[ch]*trans*0.97;   // resting on paper: optical contact
+    vec3 o = refract(d, -nX, n);
+    if(dot(o,o) > 0.){ d = o; trans *= 0.955; break; }
+    d = reflect(d, -nX);
+  }
+  if(d.y < 0.){ vec3 P = p + d*(-p.y/d.y); return floorAt(P.xz)[ch]*trans; }
+  return env(d)[ch]*trans;
+}
+vec3 shadeGlass(vec3 ro, vec3 rd, float tN, vec3 nN){
+  vec3 p = ro + rd*tN;
+  float ci = clamp(-dot(rd,nN),0.,1.);
+  float F = 0.045 + 0.955*pow(1.-ci, 5.);
+  vec3 tr = vec3(throughGlass(p,rd,nN,uN3.x,0), throughGlass(p,rd,nN,uN3.y,1), throughGlass(p,rd,nN,uN3.z,2));
+  return mix(tr, env(reflect(rd,nN)), F);
+}
+void main(){
+  // four rotated-grid sub-samples: glass where they hit it, the exact floor texel where they miss
+  vec2 offs[4] = vec2[4](vec2(-0.125,-0.375), vec2(0.375,-0.125), vec2(0.125,0.375), vec2(-0.375,0.125));
+  vec3 base = texelFetch(uFloor, ivec2(gl_FragCoord.xy), 0).rgb;
+  vec3 col = vec3(0.);
+  for(int i=0;i<4;i++){
+    vec3 rd = camRay(gl_FragCoord.xy + offs[i]);
+    vec3 nN; int face; float tN = hitPrism(uCam, rd, nN, face);
+    col += (face >= 0) ? shadeGlass(uCam, rd, tN, nN) : base;
+  }
+  col *= 0.25;
+  vec2 s = gl_FragCoord.xy/vec2(1920.,1080.) - 0.5;            // lighting falloff to the edges
+  col *= 1. - 0.24*dot(s*vec2(1.0,1.2), s*vec2(1.0,1.2));
+  fragColor = vec4(finishHue(col, gl_FragCoord.xy), 1.);
+}`;
+
+const FRAG_PRESENT = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform sampler2D uFloor;
+${XM.glslCommon}${HUE}
+void main(){
+  vec3 col = texelFetch(uFloor, ivec2(gl_FragCoord.xy), 0).rgb;
+  vec2 s = gl_FragCoord.xy/vec2(1920.,1080.) - 0.5;
+  col *= 1. - 0.24*dot(s*vec2(1.0,1.2), s*vec2(1.0,1.2));
+  fragColor = vec4(finishHue(col, gl_FragCoord.xy), 1.);
+}`;
+const R3 = [nOf(612), nOf(546), nOf(456)];
+let G = null, fanProg, floorProg, glassProg, presentProg, fanRT, floorRT;
+function frame(t) {
+  if (!G) { G = XM.gpu(); floorProg = G.program(FRAG_FLOOR); glassProg = G.program(FRAG_GLASS); presentProg = G.program(FRAG_PRESENT); floorRT = G.target(1920, 1080); fanProg = G.program(FRAG_FAN); fanRT = G.target(960, 540); }
+  const phi = mix(0.08, 0.30, smoother(prog(t, 4.2, 7.95)));
+  const V = triangle(phi), E = edges(V), o = trace(phi);
+  const tauEnd = o.sIn + Math.max(...o.Gl) + 15;
+  const u = prog(t, 0.85, 3.85);
+  const head = u > 0 ? tauEnd * (0.55 * u + 0.45 * smooth(u)) : -1;
+  const beam = smooth(prog(t, 0.8, 1.1)) * (1 - smooth(prog(t, 8.1, 8.85)));
+  const dA = [o.Do[0], o.Do[1]], dB = [o.Do[2 * NS - 2], o.Do[2 * NS - 1]];
+  const spread = Math.acos(clamp(dot(dA, dB), -1, 1));
+  const fanSgn = Math.sign(cross(dA, sub([o.X[2 * NS - 2], o.X[2 * NS - 1]], [o.X[0], o.X[1]]))) || 1;
+  const push = smoother(prog(t, 0, D));
+  const tgt = [-0.05, 0, -0.1], dist = mix(10.3, 9.7, push), el = 53 * Math.PI / 180, az = -0.05;
+  const U = {
+    uCam: [tgt[0] + dist * Math.cos(el) * Math.sin(az), dist * Math.sin(el), tgt[2] + dist * Math.cos(el) * Math.cos(az)],
+    uTgt: tgt, uFov: 36 * Math.PI / 180,
+    uV: { type: '2fv', value: new Float32Array(V.flat()) },
+    uEN: { type: '2fv', value: new Float32Array(E.flatMap(e => e.n)) },
+    uEO: { type: '1fv', value: new Float32Array(E.map(e => dot(e.n, e.a))) },
+    uH: H, uBC: [CENTER[0], H * 0.5, CENTER[1]], uBR: Math.hypot(R, H * 0.5) + 0.06,
+    uS: SRC, uD0: D0, uE: o.E, uDR: o.dR, uSin: o.sIn, uRefl: o.refl * 0.8,
+    uX: { type: '2fv', value: new Float32Array(o.X) }, uDo: { type: '2fv', value: new Float32Array(o.Do) },
+    uGl: { type: '1fv', value: new Float32Array(o.Gl) }, uCol: { type: '3fv', value: COLS },
+    uHead: head, uBeam: beam, uW0: 0.034, uK: 1.05 * spread / NS + 0.002, uFanSgn: fanSgn, uN3: R3,
+  };
+  G.run(fanProg, U, fanRT);
+  G.run(floorProg, U, floorRT, { uFan: fanRT });
+  G.run(presentProg, {}, null, { uFloor: floorRT });
+  const pts = V.flatMap(v => [[v[0], 0, v[1]], [v[0], H, v[1]]]);
+  G.run(glassProg, U, null, { uFloor: floorRT }, G.camera(U.uCam, U.uTgt, U.uFov).box(pts, 6));
+  G.finish();
+}
+
+// ---------------- score ----------------
+// Key: D major with a Lydian G♯. Beam = a bowed glass tone travelling left→right; contact = soft strike;
+// the fan opens as a rising spectral arpeggio panned across the spread; the sweep is a slow bowed chord.
+async function renderAudio({ sampleRate }) {
+  const A = XM.audio, M = A.mix(sampleRate, D), air = A.noiseArr(Math.ceil(10 * sampleRate), 3, 'pink');
+  const hz = m => 440 * 2 ** ((m - 69) / 12);
+  // room air, breathing slowly
+  A.wash(M, air, 0, D, 'bandpass', 900, 0.5, [[0, 0], [0.8, 0.05], [4, 0.04], [7.5, 0.045], [8.6, 0]]);
+  // low open fifth bed, felt more than heard
+  [[38, 0.05], [45, 0.035]].forEach(([m, a], i) => A.bowed(M, air, 0.2, 7.6, hz(m), a, { pan: i ? 0.2 : -0.2, swell: 1.4, release: 1.1, breath: 0.1, vib: 0.3 }));
+  // the beam crossing: a glass tone, panned with the head of light
+  A.bowed(M, air, 0.9, 2.0, hz(81), 0.06, { swell: 0.7, release: 0.5, breath: 0.35, vib: 4.4, pan: [[0.9, -0.85], [2.0, -0.35]] });
+  // contact with the glass at ~2.0 s
+  A.glass(M, 1.98, hz(74), 0.16, { decay: 3.2, pan: -0.35 });
+  A.glass(M, 1.99, hz(86), 0.05, { decay: 2.0, pan: -0.3 });
+  // spectrum opens (≈2.3–3.6 s): red → violet maps to rising D-Lydian degrees, panned across the fan
+  const scale = [74, 76, 78, 80, 81, 83, 85, 86, 88];
+  scale.forEach((m, i) => {
+    const tt = 2.32 + i * 0.145 + 0.02 * (i % 2);
+    A.glass(M, tt, hz(m), 0.07 * (1 - i * 0.05), { decay: 2.6 - i * 0.12, pan: -0.5 + i * 0.13, weights: [1, 0.3, 0.12, 0.04] });
+  });
+  // the sweep (4.2–7.95 s): bowed chord that slowly opens upward; one voice glides with the turn
+  [[62, 0.045, -0.4], [69, 0.04, 0.35], [76, 0.032, -0.1], [80, 0.022, 0.5]].forEach(([m, a, p], i) =>
+    A.bowed(M, air, 4.1 + i * 0.35, 7.9, hz(m), a, { pan: p, swell: 1.2, release: 1.4, breath: 0.2, vib: 4.2 + i * 0.3 }));
+  A.tone(M, 4.3, 8.6, t => t < 5.2 ? hz(85) : hz(86) + (hz(85) - hz(86)) * Math.exp(-(t - 5.2)), [[4.3, 0], [5.4, 0.02], [7.6, 0.018], [8.4, 0]], [[4.3, -0.6], [7.9, 0.6]]);
+  // arrival of the final angle: resolving soft chime
+  A.glass(M, 7.92, hz(62), 0.1, { decay: 1.6, pan: 0.1 });
+  A.glass(M, 7.95, hz(81), 0.045, { decay: 1.2, pan: 0.3 });
+  const buf = await A.render(M, { seed: 11, room: 3.6, wet: 0.5, bright: 0.45, fade: [8.3, 8.92] });
+  return A.master(buf, { lufs: -18, ceiling: -1.7, fadeOut: 0.08 });
+}
+
+XM.film({ duration: D, poster: 6.4, frame, audio: renderAudio });
+</script>
+</body></html>
