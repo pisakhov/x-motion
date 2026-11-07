@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>One Orbit · X Motion Orbit</title>
+<link rel="stylesheet" href="../reel/reel.css">
+</head><body>
+<script src="kit.js"></script>
+<script src="../reel/reel.js"></script>
+<script>
+'use strict';
+// One Orbit. A sixty-second narrated film cut from Passage, Terminator and Eclipse: the door opens,
+// the planet rises, a day of sixteen sunrises passes, and the moon covers the sun. Original score.
+// Render: node scripts/render.mjs examples/orbit/one-orbit.html --root examples --out renders/one-orbit --video
+const { clamp, lin, smooth } = Reel;
+const D = 60;
+
+// Shots: [global seconds, source-film seconds]. Slow passages hold the frame while a line is spoken.
+const shots = [
+  { id: 'passage', scene: 'passage', keys: [[3.6, 0], [5.4, 0.8], [6.9, 1.08], [7.4, 1.35], [8.2, 1.9], [9.6, 3.0], [11.0, 5.0], [16.0, 6.85], [21.5, 8.3]] },
+  { id: 'terminator', scene: 'terminator', kind: 1, keys: [[19.5, 1.0], [34.5, 9.2], [36.0, 9.6]] },
+  { id: 'eclipse', scene: 'eclipse', kind: 2, keys: [[34.0, 0.6], [36.5, 1.9], [40.5, 3.382], [46.0, 4.6], [52.0, 6.398], [57.0, 8.6], [60.0, 9.3]] },
+];
+
+const COMPOSITE = `
+uniform float uFade, uGlow;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec3 a = A(uv), b = B(uv), c;
+  if (uShots < 0.5) c = vec3(0.);
+  else if (uShots < 1.5) c = a;
+  else if (uKind < 1.5) {
+    // light dissolve: the brightest parts of the incoming shot arrive first, the shadows last
+    float s = sqrt(clamp(luma(b) * 3.0, 0., 1.));
+    float m = smoothstep(0., 1., clamp((uP - 0.62 * (1. - s)) / 0.38, 0., 1.));
+    c = mix(a, b, m) + b * s * 0.35 * sin(3.14159 * uP);
+  } else {
+    // through dark: the outgoing shot sinks to black before the next one surfaces
+    c = uP < 0.5 ? a * (1. - smoothstep(0., 0.5, uP)) : b * smoothstep(0.5, 1., uP);
+  }
+  outColor = finish(c * uFade);
+}`;
+
+const uniforms = t => ({ uFade: 1 - smooth(lin(t, 58.6, 59.9)) });
+
+const cards = [
+  { html: '<div class="kicker">X Motion · Orbit</div><div class="title">One Orbit</div>', at: [0.8, 2.0, 3.1, 4.0], rise: 14, lift: 8, blur: 6, track: [0.02, -0.03] },
+  { className: 'low', html: '<div class="title">One Orbit</div><div class="sub">Then another.</div>', at: [56.4, 57.6, 59.1, 59.8], rise: 12, blur: 5, track: [0.03, -0.025] },
+];
+
+// ------------------------------------------------------------------ score + sound
+// D Dorian through the climb; B-flat major as the planet turns; G minor in the moon's shadow;
+// D major when the light returns. Effects are placed on picture events through each shot's time map.
+const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+async function score(S, FX, R) {
+  const room = S.reverb(6.5, 11, { decay: 5.2, dark: 0.62 }, 0.55);
+  const fxRoom = FX.reverb(3.2, 23, { decay: 2.4, dark: 0.5 }, 0.4);
+  const at = R.at;
+  const crest = at('passage', 6.85), totality = at('eclipse', 3.382), ring = at('eclipse', 6.398);
+
+  // pads: overlapping sections, cross-faded in the transitions
+  const sec = (notes, t0, t1, peak, cut, extra = {}) => S.pad({
+    notes: notes.map(hz), amp: peak, send: room, sendAmt: 0.7, voices: 3, detune: 6,
+    env: [[t0, 0], [t0 + (extra.rise ?? 3), 1], [t1 - (extra.fall ?? 3), 1], [t1, 0]], cutoff: cut, ...extra.pad,
+  });
+  sec([38, 45, 52, 57], 2.0, 21.5, 0.07, [[2, 260], [9.6, 420], [crest, 1500], [21.5, 700]], { rise: 5 });
+  sec([34, 41, 50, 57, 62], 18.5, 36.0, 0.06, [[18.5, 600], [27, 1100], [36, 380]], { rise: 3.5, fall: 2.5 });
+  sec([31, 38, 46, 50], 34.0, totality + 0.6, 0.065, [[34, 300], [totality, 900]], { rise: 2, fall: 0.6 });
+  // totality: the bed collapses to a held fifth and a high, thin shimmer (the corona)
+  sec([26, 33], totality, ring + 0.8, 0.05, [[totality, 220], [ring, 340]], { rise: 1.2, fall: 0.8 });
+  sec([86, 93], totality + 0.4, ring + 0.6, 0.012, [[totality, 3000], [ring, 5200]], { rise: 3, fall: 0.6 });
+  sec([38, 45, 54, 61, 64], ring - 0.2, 60, 0.07, [[ring, 500], [ring + 3, 2200], [60, 900]], { rise: 2.4, fall: 2.2 });
+
+  // sub bass: a slow pulse under the fall, gone for the orbit, back for the shadow
+  const sub = (f, t0, t1, a) => { const g = S.ctx.createGain(); S.curve(g.gain, [[t0, 0], [t0 + 2, a], [t1 - 2, a], [t1, 0]]); g.connect(S.master); S.osc('sine', f, t0, t1, g); };
+  sub(hz(26), 7.2, 20.5, 0.11); sub(hz(19), 35.0, totality + 0.5, 0.12); sub(hz(26), ring, 59.8, 0.1);
+
+  // bells: one chime per "sunrise" across the orbit, then a slow motif to end
+  const partials = [[1, 1, 1.4], [2.76, 0.35, 0.7], [5.4, 0.14, 0.35], [8.93, 0.06, 0.18]];
+  const sunrise = [69, 74, 76, 81, 76, 74, 72, 74, 76, 81, 79, 76];
+  sunrise.forEach((m, i) => S.bell({ t: 19.8 + i * 1.22, f: hz(m), amp: 0.045 * (1 - i / 16), pan: Math.sin(i * 1.7) * 0.5, partials, send: room, sendAmt: 0.8 }));
+  [[crest, 81, 0.07], [crest + 0.35, 86, 0.05], [ring, 86, 0.08], [ring + 0.16, 93, 0.06], [ring + 0.5, 90, 0.05], [ring + 2.4, 81, 0.05], [ring + 3.1, 78, 0.045], [56.1, 74, 0.06], [56.9, 69, 0.05], [57.8, 62, 0.06]]
+    .forEach(([t, m, a], i) => S.bell({ t, f: hz(m), amp: a, pan: (i % 3 - 1) * 0.3, partials, send: room, sendAmt: 0.9 }));
+
+  // ---- sound effects
+  // the X seal: a dense metallic turn, the crack of the seam, then the leaves rushing apart
+  const turn = at('passage', 1.12), crack = at('passage', 1.42);
+  FX.noise({ t0: turn - 0.05, t1: turn + 0.7, seed: 3, color: 'brown', type: 'lowpass', freq: [[turn, 900], [turn + 0.6, 180]], q: 0.9, gain: [[turn - 0.05, 0], [turn, 0.9], [turn + 0.7, 0]], send: fxRoom });
+  FX.bell({ t: turn + 0.02, f: 92, amp: 0.12, partials: [[1, 1, 0.25], [2.31, 0.6, 0.12], [3.7, 0.35, 0.08], [5.1, 0.2, 0.05]], send: fxRoom, sendAmt: 0.6 });
+  FX.bell({ t: crack, f: 1650, amp: 0.05, partials: [[1, 1, 0.05], [1.47, 0.6, 0.04], [2.9, 0.3, 0.02]], send: fxRoom, sendAmt: 0.8 });
+  FX.noise({ t0: crack, t1: crack + 0.35, seed: 5, type: 'highpass', freq: [[crack, 3000]], q: 0.7, gain: [[crack, 0], [crack + 0.01, 0.2], [crack + 0.35, 0]] });
+  const fly0 = at('passage', 1.72), fly1 = at('passage', 2.75);
+  FX.noise({ t0: fly0 - 0.3, t1: fly1 + 0.6, seed: 7, color: 'pink', type: 'bandpass', freq: [[fly0 - 0.3, 300], [fly1, 2600], [fly1 + 0.6, 1200]], q: 0.8, gain: [[fly0 - 0.3, 0], [fly0 + 0.4, 0.55], [fly1, 0.4], [fly1 + 0.6, 0]], pan: [[fly0, -0.6], [fly1, 0.6]], send: fxRoom });
+  // the fall: air rising under the warp, settling as the planet arrives
+  const w0 = at('passage', 1.45), w1 = at('passage', 4.4);
+  FX.noise({ t0: w0, t1: w1 + 1.5, seed: 9, color: 'brown', type: 'lowpass', freq: [[w0, 120], [w1, 700], [w1 + 1.5, 160]], q: 0.6, gain: [[w0, 0], [w0 + 1.2, 0.5], [w1, 0.35], [w1 + 1.5, 0]] });
+  // sunrise over the limb: a long breath of light
+  FX.noise({ t0: crest - 2.5, t1: crest + 3, seed: 13, color: 'pink', type: 'bandpass', freq: [[crest - 2.5, 900], [crest, 5200], [crest + 3, 2400]], q: 0.5, gain: [[crest - 2.5, 0], [crest, 0.16], [crest + 3, 0]], send: room, sendAmt: 0.6 });
+  // light dissolve and through-dark transition
+  FX.noise({ t0: 18.7, t1: 21.8, seed: 17, color: 'pink', type: 'bandpass', freq: [[18.7, 500], [21.0, 3400], [21.8, 2000]], q: 0.7, gain: [[18.7, 0], [20.9, 0.14], [21.8, 0]], pan: [[18.7, 0.4], [21.8, -0.4]], send: room, sendAmt: 0.5 });
+  FX.noise({ t0: 33.4, t1: 36.6, seed: 19, color: 'brown', type: 'lowpass', freq: [[33.4, 500], [35.0, 90], [36.6, 300]], q: 0.7, gain: [[33.4, 0], [34.9, 0.5], [36.6, 0]] });
+  FX.osc('sine', 41, 34.9, 37.5, (() => { const g = S.ctx.createGain(); FX.curve(g.gain, [[34.9, 0], [35.0, 0.3], [37.5, 0]]); g.connect(FX.master); return g; })());
+  // totality: the hush lands with a soft deep impact; the diamond ring flashes with a bright shimmer
+  FX.noise({ t0: totality - 0.08, t1: totality + 2.5, seed: 23, color: 'brown', type: 'lowpass', freq: [[totality, 260], [totality + 2.5, 60]], q: 0.8, gain: [[totality - 0.08, 0], [totality, 0.6], [totality + 2.5, 0]], send: fxRoom });
+  FX.noise({ t0: ring - 1.2, t1: ring + 2.4, seed: 29, type: 'highpass', freq: [[ring - 1.2, 4000], [ring, 7000]], q: 0.5, gain: [[ring - 1.2, 0], [ring, 0.12], [ring + 2.4, 0]], send: room, sendAmt: 0.7 });
+}
+
+Reel.film({
+  duration: D, poster: 41.6,
+  scenes: { passage: 'passage.html', terminator: 'terminator.html', eclipse: 'eclipse.html' },
+  shots, composite: COMPOSITE, uniforms, cards,
+  fonts: ['300 112px Geist', '500 22px Geist', '400 26px Geist'],
+  voice: { audio: 'voice/one-orbit.flac', cues: 'voice/one-orbit.cues.json' },
+  mix: { musicDuckDb: -8, fxDuckDb: -4, roomWet: 0.09 },
+  score,
+});
+</script>
+</body></html>

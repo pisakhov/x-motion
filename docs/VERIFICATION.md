@@ -43,6 +43,17 @@ Render a film with `node scripts/render.mjs examples/orbit/passage.html --out re
 - Gallery end-to-end (local server and the production nginx image): 3 theme chapters, 9 film pages (metadata, muted playback, no autoplay, prompt copy, ID copy, skill links, arrow keys), 4 skill pages (raw Markdown served as `text/markdown`, Copy Markdown equals the file byte for byte, download link), 404 page, relative redirects, no overflow or controls under 44 px at 360, 390, 768 and 1280 px, reduced motion keeps previews still.
 - HTTP suite against the image: health, security and cache headers, catalog, video, poster and preview digests, byte ranges, page content types.
 
+## Narrated films
+
+One Orbit (XM-0013) is a 60 s film cut by the shared reel engine (`examples/reel/`) from Passage, Terminator and Eclipse, with Kokoro narration, an original score, effects placed on picture events and WebVTT captions.
+
+| ID | Film | Length | Integrated | True peak | Narration (Whisper base.en on the final MP4) |
+| --- | --- | --- | --- | --- | --- |
+| XM-0013 | One Orbit | 60 s | -18 LUFS | -1.7 dBFS | 0/91 word errors |
+
+- Rendered 1,800 frames at 1920×1080, 30 fps (H.264 and AAC, 60.0 s). The storyboard stills were inspected as images.
+- Bending Light (Prism) and One Breath (Sumi) are committed as sources and will be published after they render.
+
 ## Review notes
 
 - Poster frames and selected stills of all nine films were inspected as images. During review the Terminator Line ground read olive; the ocean and land shading were cooled and the film re-rendered. A warm cast on sunlit land remains by design at the dawn line.

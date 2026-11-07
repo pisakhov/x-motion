@@ -1,0 +1,17 @@
+{
+  "title": "One Breath",
+  "voice": "am_michael",
+  "lang": "en-us",
+  "speed": 0.88,
+  "duration": 60,
+  "lines": [
+    { "at": 4.4, "text": "Begin with a single drop." },
+    { "at": 7.0, "text": "Ink never moves the same way twice." },
+    { "at": 10.4, "text": "It opens, slowly, like a flower under water." },
+    { "at": 15.6, "text": "Then it lets go, and becomes mist." },
+    { "at": 21.4, "text": "Far mountains need almost no ink at all. The paper does the rest." },
+    { "at": 28.0, "text": "A crane crosses. No one asks where it is going." },
+    { "at": 39.0, "text": "Last, the circle. One breath. One stroke." },
+    { "at": 45.0, "text": "It does not need to be perfect. Only finished." }
+  ]
+}

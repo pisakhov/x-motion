@@ -9,7 +9,7 @@ import { SITE, setThemes, homePage, themePage, filmPage, skillPage, skillsIndex,
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = '.x-motion-build.json';
-const PUBLIC_FIELDS = ['id', 'title', 'description', 'status', 'duration', 'width', 'height', 'video', 'poster', 'preview', 'parentId', 'createdAt', 'hasAudio', 'theme', 'slug', 'prompt', 'skills', 'model', 'source'];
+const PUBLIC_FIELDS = ['id', 'title', 'description', 'status', 'duration', 'width', 'height', 'video', 'poster', 'preview', 'parentId', 'createdAt', 'hasAudio', 'theme', 'slug', 'prompt', 'skills', 'model', 'source', 'captions', 'transcript'];
 const SITE_FILES = ['style.css', 'app.js', 'fonts/geist.woff2', 'fonts/geist-mono.woff2', 'fonts/OFL.txt'];
 
 export function publicCatalog(catalog) {

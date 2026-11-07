@@ -1,0 +1,18 @@
+{
+  "title": "Bending Light",
+  "voice": "bf_emma",
+  "lang": "en-gb",
+  "speed": 0.92,
+  "duration": 60,
+  "lines": [
+    { "at": 4.6, "text": "White light looks simple. It isn't." },
+    { "at": 7.4, "text": "Send it through glass, and it comes apart: every colour it was carrying, side by side." },
+    { "at": 13.0, "text": "Red bends the least. Violet bends the most." },
+    { "at": 22.6, "text": "Water does it too." },
+    { "at": 24.6, "text": "A surface moves, and light gathers into bright, living lines." },
+    { "at": 29.4, "text": "One drop, and the pattern breaks, rings out, and knits itself back together." },
+    { "at": 41.8, "text": "Glass can gather light, as well as split it." },
+    { "at": 45.0, "text": "A sphere becomes a lens, and the light it gathers burns to a single point." },
+    { "at": 51.0, "text": "Even now, the lens in your eye is bending light, to show you this." }
+  ]
+}

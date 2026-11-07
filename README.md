@@ -16,6 +16,8 @@ Inspired by LangChain's [How We Built Our Design Agent](https://www.langchain.co
 | Prism | [`x-motion-prism`](skills/x-motion-prism/SKILL.md) | Light, glass and colour at rest. |
 | Sumi | [`x-motion-sumi`](skills/x-motion-sumi/SKILL.md) | Ink, paper and breath. |
 
+Each theme also has a one-minute narrated film that cuts its three short films together: **One Orbit**, **Bending Light** and **One Breath**. They combine narration, an original score, sound effects placed on picture events, a mix that ducks under every line, and transitions designed for each theme. Film pages offer English captions and a transcript.
+
 Every film page shows the exact prompt that started it, the skills that shaped it, the model that wrote it and a link to its source. Every skill opens as a readable page with **Copy Markdown** and **Download**, so you can paste it into any agent. The raw files are served at `/skills/<name>/SKILL.md`.
 
 Each film has a permanent ID such as `XM-0004`. Tell X in chat, for example: "XM-0004: keep the flare, slow the planet rise." Revisions get new IDs linked to their parents. Discarded films leave the deployed gallery but remain in source history. See [the feedback workflow](docs/FEEDBACK.md) and [deployment](docs/DEPLOYMENT.md).
@@ -71,6 +73,12 @@ node scripts/render.mjs examples/orbit/passage.html --out renders/passage-board 
 node scripts/render.mjs examples/orbit/passage.html --out renders/passage --video
 ```
 
+The long films load their source films from sibling folders, so serve the whole `examples` directory with `--root`:
+
+```sh
+node scripts/render.mjs examples/orbit/one-orbit.html --root examples --out renders/one-orbit --video
+```
+
 A storyboard writes five PNG stills and `manifest.json`; `--times 0.5,2,4.25` picks the stills and `--audio` adds `sound.wav` with loudness figures. `--video` also writes every frame, `poster.webp` and `film.mp4` with the score muxed as AAC. Use a fresh `--out` path for each revision; outputs are never silently overwritten.
 
 To publish a render, write a spec with the source, theme, slug, title, description, prompt, skills and model, then:
@@ -80,6 +88,19 @@ npm run catalog -- add --render renders/passage --spec spec.json
 ```
 
 This copies the verified film and poster under the next permanent ID, makes a muted 960 px preview loop, and records the film in **Review**.
+
+### Long films and narration
+
+`examples/reel/reel.js` builds a long film out of existing compositions. It opens each source film in a hidden frame, asks it for a frame at a remapped time, and composites the shots with a WebGL2 transition shader. Each shot's time map is a monotone curve, so a shot can ease into slow motion without jumping or reversing. The same map, inverted, places each sound effect on its visual event. Title cards are HTML text. The score uses the Orbit kit's audio tools, mixed with the narration track. Music and effects duck under each spoken line, and the finished mix is normalised to -18 LUFS with a -1.7 dBTP ceiling.
+
+Narration is generated from a script with Kokoro (see [provenance](docs/PROVENANCE.md)):
+
+```sh
+python scripts/voice.py examples/orbit/voice/one-orbit.json            # writes .flac, .cues.json and .vtt
+python scripts/voice.py examples/orbit/voice/one-orbit.json --check    # transcribe and report word error rate
+```
+
+To publish captions with a film, add `"captions": "examples/orbit/voice/one-orbit.vtt"` to the catalog spec.
 
 ### Composition contract
 

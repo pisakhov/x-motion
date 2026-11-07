@@ -1,0 +1,62 @@
+{
+  "sampleRate": 48000,
+  "duration": 60,
+  "lineLufs": -20.0,
+  "peakDbfs": -2.0,
+  "voice": "am_michael",
+  "lang": "en-us",
+  "model": "Kokoro-82M v1.0 (Apache-2.0) via kokoro-onnx (MIT)",
+  "files": {
+    "kokoro-v1.0.onnx": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
+    "voices-v1.0.bin": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+  },
+  "packages": {
+    "kokoro-onnx": "0.6.1",
+    "onnxruntime": "1.31.1",
+    "numpy": "2.5.4",
+    "soundfile": "0.14.0"
+  },
+  "audioSha256": "1365baa89eb716c2b58957801202b67e9996112f5e77b70ea491adeaccd88127",
+  "lines": [
+    {
+      "start": 4.4,
+      "end": 6.1756,
+      "text": "Begin with a single drop."
+    },
+    {
+      "start": 7.0,
+      "end": 9.5105,
+      "text": "Ink never moves the same way twice."
+    },
+    {
+      "start": 10.4,
+      "end": 13.6335,
+      "text": "It opens, slowly, like a flower under water."
+    },
+    {
+      "start": 15.6,
+      "end": 17.888,
+      "text": "Then it lets go, and becomes mist."
+    },
+    {
+      "start": 21.4,
+      "end": 26.1003,
+      "text": "Far mountains need almost no ink at all. The paper does the rest."
+    },
+    {
+      "start": 28.0,
+      "end": 31.5875,
+      "text": "A crane crosses. No one asks where it is going."
+    },
+    {
+      "start": 39.0,
+      "end": 41.7395,
+      "text": "Last, the circle. One breath. One stroke."
+    },
+    {
+      "start": 45.0,
+      "end": 48.0568,
+      "text": "It does not need to be perfect. Only finished."
+    }
+  ]
+}

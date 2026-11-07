@@ -91,6 +91,12 @@ button { font: inherit; color: inherit; }
 .block { display: grid; gap: 10px; }
 .block-head { display: flex; justify-content: space-between; align-items: center; }
 .block h2 { font-size: 0.875rem; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+.transcript summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; list-style: none; }
+.transcript summary::-webkit-details-marker { display: none; }
+.transcript summary::after { content: "+"; margin-left: auto; color: var(--muted); }
+.transcript[open] summary::after { content: "−"; }
+.transcript summary:focus-visible { outline: 2px solid var(--text); outline-offset: 4px; border-radius: 4px; }
+.transcript p { color: var(--soft); line-height: 1.65; margin: 0; }
 .prompt { background: var(--raise); border-radius: var(--radius); padding: 16px 18px; line-height: 1.65; color: var(--soft); }
 .chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .chips .chip { min-height: 44px; padding: 0 14px; }
