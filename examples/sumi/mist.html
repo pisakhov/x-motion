@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mist · X Motion Sumi</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;background:#000;overflow:hidden} canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="film" width="1920" height="1080"></canvas>
+<script src="kit.js"></script>
+<script>
+'use strict';
+// Mist: seven ink-wash ridges recede into haze; the camera drifts forward through them while fog
+// rolls along their feet. A crane crosses the far sky right to left; a vermilion sun sits low in the haze.
+// Cue map (seconds): 0.0 wind rises from silence | 0.9 low D pluck | 2.6 A as the crane enters |
+// 3.4 E | 5.8 F sliding down to E as the nearest ridge sinks past | 7.6 C | 9.0 D | 9.6 A |
+// 10.2 low D, wind thins | silence from 11.86.
+const D = 12;
+window.motion = { width: 1920, height: 1080, duration: D, fps: 30, poster: 8.6 };
+
+const gl = XM.initGL(document.getElementById('film'));
+const prog = XM.program(gl, `
+uniform float uZc;       // camera depth
+uniform vec3 uCrane;     // screen x, screen y (H units), wing phase
+const float HOR = 0.50;  // horizon (screen y)
+const float YC = 0.30;   // camera height
+const int NL = 7;
+const float Z[7]  = float[7](1.05, 1.70, 2.50, 3.50, 4.80, 6.40, 8.50);    // ridge depths
+const float YB[7] = float[7](1.00, 0.875, 0.775, 0.695, 0.635, 0.585, 0.545); // ridge foot on screen at t = 0
+const float SA[7] = float[7](0.20, 0.30, 0.20, 0.30, 0.22, 0.34, 0.30);    // ridge height on screen at t = 0
+const float XO[7] = float[7](0.40, 1.90, 3.10, 4.70, 5.60, 7.30, 8.80);    // profile offsets
+const vec2 SUN = vec2(1.30, 0.395);
+const float SUNR = 0.046;
+
+float h11(float x){ return fract(sin(x * 127.1 + 311.7) * 43758.5453); }
+float gn(float x){                       // smooth 1D gradient noise, about [-0.5, 0.5]
+  float i = floor(x), f = x - i;
+  float g0 = h11(i) * 2.0 - 1.0, g1 = h11(i + 1.0) * 2.0 - 1.0;
+  float u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  return mix(g0 * f, g1 * (f - 1.0), u);
+}
+// ridge profile in [0, ~1]: sharp ridged peaks, a broad envelope so each range leans to one side
+float prof(float x, float k){
+  float r = 1.0 - abs(2.0 * gn(x * 1.6 + k));
+  float r2 = 1.0 - abs(2.0 * gn(x * 3.7 + k * 1.7));
+  float h = 0.66 * r * r * r + 0.22 * r2 * r2 + 0.08 * gn(x * 11.0 + k) + 0.035 * gn(x * 29.0 + k * 2.3);
+  float env = 0.12 + 0.88 * smoothstep(-0.30, 0.32, gn(x * 0.45 + k * 0.37));
+  return max(h, 0.0) * env;
+}
+float capsule(vec2 p, vec2 a, vec2 b, float ra, float rb){
+  float h; float d = segD(p, a, b, h); return d - mix(ra, rb, h);
+}
+
+void main(){
+  vec2 px = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec2 s = px / uRes.y;                          // H units, y down
+  float aa = 1.6 / uRes.y;                       // ~1.6 px soft edge
+  vec4 pp = paperAt(px, 0.0);
+  vec4 pb = paperAt(px, 1.5);
+
+  vec3 mist = washi(pb, 0.93);
+  // ridges, near to far, composited front to back (exact over-compositing, with an early exit once opaque).
+  // Each ridge is an opaque wash, darkest at its crest, dissolving into mist below; a fog sheet rolls at its foot.
+  vec3 acc = vec3(0.0); float T = 1.0;
+  for (int j = 0; j < NL; j++) {
+    float z = Z[j], d = z - uZc;
+    if (d < 0.36) continue;
+    float vis = smoothstep(0.36, 0.78, d);
+    float k = float(j);
+    float sc = z / d;                                          // perspective growth since t = 0
+    float ybase = HOR + (YB[j] - HOR) * sc;
+    float xs = (s.x - 0.889) / sc + 0.889 + XO[j];             // profile coordinate (screen units at t = 0)
+    float atm = exp(-0.45 * d);                                // far ridges paler
+    // fog sheet in front of this ridge's foot
+    float fy = (s.y - (HOR + (YB[j] - HOR + 0.03) * sc)) / sc;
+    if (abs(fy) < 0.16) {
+      float band = exp(-pow(fy / 0.045, 2.0)) + 0.7 * exp(-pow((fy + 0.07) / 0.05, 2.0));
+      float roll = fbm3(vec2(xs * 1.1 - uT * (0.012 + 0.004 * k), fy * 5.0 + 0.15 * sin(uT * 0.25 + k)));
+      float f = clamp(band * smoothstep(0.25, 0.70, roll) * (0.72 + 0.2 * atm), 0.0, 1.0) * vis;
+      acc += T * f * mist; T *= 1.0 - f;
+    }
+    if (s.y > ybase - SA[j] * sc * 1.15 - 0.01) {              // below the highest possible crest
+      float pr = prof(xs * 0.62, k * 3.17 + 1.3);
+      float yr = ybase - SA[j] * sc * pr;
+      float blur = aa * (1.0 + 0.5 * k) * mix(1.0, 0.6, smoothstep(1.0, 2.5, sc));
+      float bleed = 0.0028 * (n1(vec2(xs * 4.0, k * 0.21)) - 0.5) + 0.0012 * (pb.g - 0.5);
+      float cov = smoothstep(-blur, blur, (s.y - yr) + bleed);
+      if (cov > 0.0) {
+        float dy = (s.y - yr) / sc;                            // depth below the crest, layer units
+        float L = 0.022 + 0.045 * pr;                          // tall peaks keep their wash longer
+        float crest = exp(-dy / 0.0065) * (0.6 + 0.8 * n2(vec2(xs * 3.0, k * 0.13)));
+        float body = exp(-dy / L);
+        // texture strokes: slanted dry streaks under the crest, caught by paper tooth
+        float cun = 0.0;
+        if (dy < L * 3.5) cun = smoothstep(0.52, 0.70, fbm3(vec2(xs * 6.5 + dy * 2.2, dy * 2.6 + k * 0.37)) + 0.25 * (pp.b - 0.5)) * exp(-dy / (L * 0.7));
+        float gran = 0.86 + 0.28 * pb.b;
+        float dens = (0.34 * crest + 0.70 * body + 0.30 * cun) * gran * (0.08 + 1.4 * atm);
+        vec3 m = mix(mist, washi(pb, 0.86), 0.25 * smoothstep(0.0, 0.25, dy));
+        float a = cov * vis;
+        acc += T * a * inkOver(m, dens); T *= 1.0 - a;
+      }
+    }
+    if (T < 0.004) break;
+  }
+
+  vec3 col = acc;
+  if (T > 0.004) {
+    // sky: warm paper, brighter in the haze band over the horizon
+    float light = 0.62 + 0.38 * exp(-pow((s.y - 0.40) / 0.22, 2.0)) - 0.12 * smoothstep(0.5, 1.0, abs(s.x - 1.1) / 1.1);
+    vec3 sky = washi(pp, clamp(light, 0.0, 1.0));
+
+    // vermilion sun at infinity, veiled by drifting haze bands, its lower edge melting into the haze
+    vec2 sd = s - SUN;
+    if (dot(sd, sd) < 0.012) {
+      float r = length(sd) + 0.0025 * (n1(s * 3.0 + 0.2) - 0.5);
+      float disc = smoothstep(SUNR + aa * 1.2, SUNR - aa * 1.2, r);
+      float haze = fbm3(vec2(s.x * 1.3 - uT * 0.006, s.y * 3.0 + 0.3));
+      float veil = 0.30 + 0.16 * smoothstep(0.35, 0.8, haze) + 0.35 * smoothstep(SUN.y - 0.015, SUN.y + SUNR, s.y);
+      vec3 pig = lin(vec3(0.784, 0.216, 0.176)) / lin(vec3(0.945, 0.913, 0.847));
+      sky *= mix(vec3(1.0), pig, disc * (1.0 - veil) * (0.92 + 0.08 * pp.a));
+    }
+
+    // crane: a small silhouette in the far sky (bounding box first)
+    vec2 cq = s - uCrane.xy;
+    if (abs(cq.x) < 0.075 && abs(cq.y) < 0.06) {
+      const float S = 0.05;
+      vec2 p = vec2(-cq.x, cq.y) / S;              // +x is the flight direction (screen left), y down
+      float ph = uCrane.z;
+      float stroke = ph + 0.35 * sin(ph);          // quicker downstroke
+      float wy = -cos(stroke);                     // wing tip height: -1 up, +1 down
+      float d = length(vec2(p.x / 0.30, p.y / 0.085)) - 1.0; d *= 0.085;   // body
+      d = min(d, capsule(p, vec2(0.22, -0.02), vec2(0.74, -0.075), 0.040, 0.030));   // neck
+      d = min(d, length(p - vec2(0.77, -0.08)) - 0.052);                            // head
+      d = min(d, capsule(p, vec2(0.80, -0.075), vec2(1.00, -0.050), 0.020, 0.010));  // bill
+      d = min(d, capsule(p, vec2(-0.26, 0.02), vec2(-0.92, 0.075), 0.030, 0.026));   // trailing legs
+      d = min(d, capsule(p, vec2(-0.20, -0.01), vec2(-0.40, 0.03), 0.06, 0.03));     // tail
+      vec2 sh = vec2(0.06, -0.03);
+      vec2 tip = sh + vec2(-0.16 - 0.08 * abs(wy), 0.72 * wy);
+      vec2 mid = sh + vec2(-0.05, 0.40 * wy - 0.06 * (1.0 - abs(wy)));
+      float wing = min(capsule(p, sh, mid, 0.17, 0.15), capsule(p, mid, tip, 0.15, 0.05));
+      vec2 tip2 = sh + vec2(-0.10, 0.52 * wy) + vec2(0.05, -0.04);
+      float wing2 = min(capsule(p, sh + vec2(0.03, -0.02), mid * 0.75 + vec2(0.03, -0.03), 0.10, 0.08), capsule(p, mid * 0.75 + vec2(0.03, -0.03), tip2, 0.08, 0.03));
+      float body = smoothstep(aa / S, -aa / S, d);
+      float w1 = smoothstep(aa / S, -aa / S, wing);
+      float w2 = smoothstep(aa / S, -aa / S, wing2);
+      float tipInk = smoothstep(0.25, 0.65, length(p - sh) / 0.7);   // darker flight feathers
+      float dens = max(body * 0.95, max(w1 * (0.55 + 0.45 * tipInk), w2 * (0.35 + 0.3 * tipInk) * 0.8));
+      sky = inkOver(sky, dens * 0.62);
+    }
+
+
+    col += T * sky;
+  }
+
+  // low haze over the whole bottom, so nothing ends in a hard edge
+  col = mix(col, mist, 0.35 * smoothstep(0.82, 1.0, s.y));
+  vec2 vq = (px / uRes - 0.5) * vec2(1.0, 0.9);
+  col *= 1.0 - 0.16 * smoothstep(0.18, 0.62, dot(vq, vq) * 2.0);
+  outColor = vec4(dither(srgb(col)), 1.0);
+}`);
+
+// camera drift: eases in over the first second, then constant
+const camZ = t => 0.08 * (t + 0.6 * Math.exp(-t / 0.6) - 0.6);
+function crane(t) {
+  const u = t - 1.8;
+  return [1.95 - 0.215 * u, 0.142 + 0.010 * Math.sin(0.45 * t) + 0.0035 * Math.sin((2 * Math.PI * t) / 1.3 + 1.2), (2 * Math.PI * t) / 1.3];
+}
+function frame(t) { prog.draw({ uT: t, uZc: camZ(t), uCrane: crane(t) }); }
+XM.run({ duration: D, draw: frame });
+
+window.renderAudio = async function ({ sampleRate }) {
+  const ctx = new OfflineAudioContext(2, Math.ceil(D * sampleRate), sampleRate), A = XM.audio;
+  const m = A.master(ctx, { seed: 57, reverbSeconds: 4.8, decay: 1.4, gain: 1.46, fade: [11.0, 11.86] });
+  // wind: decorrelated stereo noise beds, each with a seeded gust curve and a wandering band
+  const N = 512;
+  const wind = (seed, color, type, freqLo, freqHi, q, lo, hi, wet) => {
+    const src = ctx.createBufferSource(); src.buffer = A.noise(ctx, D, seed, color);
+    const fl = ctx.createBiquadFilter(); fl.type = type; fl.Q.value = q;
+    fl.frequency.setValueCurveAtTime(A.curve(N, seed + 1, 9, freqLo, freqHi), 0, D);
+    const gust = ctx.createGain(); gust.gain.setValueCurveAtTime(A.curve(N, seed + 2, 11, lo, hi), 0, D);
+    const env = ctx.createGain(); A.env(env.gain, [[0, 0, 'set'], [1.6, 1], [10.0, 1], [11.6, 0]]);
+    src.connect(fl); fl.connect(gust); gust.connect(env);
+    A.route(ctx, m, env, { wet, dry: 1 });
+    src.start(0);
+  };
+  wind(101, 'brown', 'lowpass', 220, 420, 0.5, 0.06, 0.14, 0.15);
+  wind(203, 'pink', 'bandpass', 420, 900, 0.8, 0.026, 0.095, 0.3);
+  wind(307, 'white', 'bandpass', 1300, 2300, 3.0, 0.004, 0.018, 0.4);
+  // sparse plucked melody in D, open intervals, each note after a visual event
+  const notes = [
+    { t: 0.9, f: 146.83, level: 0.27, pan: -0.15, len: 4.2 },
+    { t: 2.6, f: 220.0, level: 0.25, pan: 0.30, len: 3.6 },
+    { t: 3.4, f: 329.63, level: 0.34, pan: 0.18, len: 3.2 },
+    { t: 5.8, f: 349.23, level: 0.40, pan: -0.05, len: 3.6, glide: { at: 0.45, dur: 0.30, f: 329.63 } },
+    { t: 7.6, f: 261.63, level: 0.34, pan: -0.25, len: 3.4 },
+    { t: 9.0, f: 293.66, level: 0.32, pan: -0.38, len: 2.8 },
+    { t: 9.6, f: 220.0, level: 0.21, pan: -0.42, len: 2.2 },
+    { t: 10.2, f: 146.83, level: 0.24, pan: -0.2, len: 1.65 },
+  ];
+  notes.forEach((n, i) => A.pluck(ctx, m, { wet: 0.5, damp: 0.995, bright: 0.38, seed: 400 + i * 13, ...n, level: n.level * 1.7 }));
+  return await ctx.startRendering();
+};
+</script>
+</body>
+</html>

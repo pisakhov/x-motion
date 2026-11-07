@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Caustics · X Motion Prism</title>
+<style>html,body{margin:0;background:#000;overflow:hidden} canvas{display:block;width:100vw;height:100vh}</style>
+</head><body>
+<script src="kit.js"></script>
+<script>
+'use strict';
+// Caustics. Overhead, orthographic: a shallow pool over pale stone. The light on the floor is the
+// Jacobian of the refraction map, 1/|det(I − d·Hess h)|, from analytic waves plus one drop's ring
+// packets, evaluated with three depth factors for thin spectral rims. Everything derives from t.
+const { clamp, mix, prog, smooth, smoother } = XM;
+const D = 10, NW = 9, TD = 3.2;               // duration, wave count, impact time
+const DROP = [0.46, 0.17];                     // impact point (world units, 1 = half frame height)
+const SUN = [0.20, -0.16];                     // horizontal sun drift per unit height (shadow offset)
+
+// Seeded wave field: wavelengths 0.13–0.42, directions spread by the golden angle, slow dispersive speeds.
+const WAVES = (() => {
+  const r = XM.mulberry32(20261106), w = new Float32Array(NW * 4), a = new Float32Array(NW);
+  for (let i = 0; i < NW; i++) {
+    const lam = 0.13 * Math.pow(0.42 / 0.13, (i + r() * 0.6) / NW), k = 2 * Math.PI / lam;
+    const th = 0.4 + i * 2.39996 + (r() - 0.5) * 0.5;   // golden-angle spread: a net, not streaks
+    const v = 0.05 * Math.sqrt(lam / 0.3);
+    w.set([k * Math.cos(th), k * Math.sin(th), k * v, r() * 6.2831], i * 4);
+    a[i] = (0.75 + 0.5 * r()) / (k * k);         // equal curvature share per wave
+  }
+  return { w, a };
+})();
+// Ring packets: group speed, wavenumber, width, amplitude. Crests run 1.6× faster than their packet.
+const RINGS = [[0.36, 2 * Math.PI / 0.15, 0.10, 0.0046], [0.27, 2 * Math.PI / 0.10, 0.075, 0.0030], [0.19, 2 * Math.PI / 0.072, 0.055, 0.0018]];
+
+const FRAG = `#version 300 es
+precision highp float;
+out vec4 o;
+#define NW ${NW}
+uniform float uT, uTau, uFallZ, uFallA, uTear, uHole, uDecay, uCurv;
+uniform vec4 uW[NW]; uniform float uA[NW];
+uniform vec4 uR[3];
+uniform vec2 uDrop, uSun;
+${XM.glslCommon}
+const vec3 STONE = vec3(0.791, 0.753, 0.687);   // #e6e1d8 linear
+const vec3 WATER = vec3(0.900, 0.985, 0.975);   // soft cool transmission (#d8e6e4 family)
+const float DEPTH = 0.205;                      // depth · (1 − 1/n), green
+
+// Base waves: gradient and Hessian (xx, xy, yy), amplitude scaled by m.
+void waves(vec2 p, float m, inout vec2 g, inout vec3 H){
+  for(int i=0;i<NW;i++){
+    vec4 w=uW[i]; float ph=dot(w.xy,p)-w.z*uT+w.w, a=uA[i]*m*uCurv;
+    g += a*cos(ph)*w.xy;
+    H -= a*sin(ph)*vec3(w.x*w.x, w.x*w.y, w.y*w.y);
+  }
+}
+float ringF(float r){
+  float s=0.;
+  for(int j=0;j<3;j++){ vec4 R=uR[j]; float x=r-R.x*uTau; float xp=r-1.6*R.x*uTau;
+    s += R.w*exp(-x*x/(R.z*R.z))*sin(R.y*xp); }
+  return s*inversesqrt(r+0.05);
+}
+void ring(vec2 p, inout vec2 g, inout vec3 H){
+  vec2 q=p-uDrop; float r=max(length(q),1e-4); vec2 n=q/r; float e=0.003;
+  float f0=ringF(r), fp=ringF(r+e), fm=ringF(max(r-e,0.));
+  float f1=(fp-fm)/(2.*e)*uDecay, f2=(fp-2.*f0+fm)/(e*e)*uDecay;
+  g += f1*n;
+  float t=f1/max(r,0.02);
+  H += vec3(f2*n.x*n.x + t*(1.-n.x*n.x), (f2-t)*n.x*n.y, f2*n.y*n.y + t*(1.-n.y*n.y));
+}
+float light(vec3 H, float d){ // inverse Jacobian determinant of x → x − d·∇h, softened
+  float det=(1.-d*H.x)*(1.-d*H.z)-d*d*H.y*H.y;
+  return 1./sqrt(det*det+0.006);
+}
+float stone(vec2 p, out float joint){
+  vec2 sz=vec2(1.06,0.71); vec2 q=p/sz; float row=floor(q.y); q.x+=0.5*mod(row,2.);
+  vec2 id=floor(q), f=fract(q)-0.5; vec2 dd=(0.5-abs(f))*sz;
+  float d=min(dd.x,dd.y), aa=fwidth(p.x)*1.2;
+  joint=1.-smoothstep(0.0035-aa,0.0035+aa,d);
+  float tone=1.+0.045*(hash12(id+7.)-0.5);
+  float tex=0.97+0.035*fbm3(p*5.1)+0.012*vnoise(p*31.);
+  return tone*tex;
+}
+void main(){
+  vec2 S=(gl_FragCoord.xy-vec2(960.,540.))/540.;
+  vec2 q=S-uDrop; float r=length(q);
+  // the net tears open behind the rings, then knits back from the edge inward
+  float hole=uTear*(1.-smoothstep(uHole*0.55,uHole+0.02,r));
+  vec2 g=vec2(0); vec3 H=vec3(0);
+  waves(S,1.-hole,g,H);
+  if(uTau>0.) ring(S,g,H);
+  // light on the floor (three depth factors → thin dispersion at the folds)
+  vec3 I=vec3(light(H,DEPTH*0.962), light(H,DEPTH), light(H,DEPTH*1.04));
+  // what we see: the floor displaced by the same slope
+  vec2 P=S-DEPTH*0.9*g;
+  float joint; float alb=stone(P,joint);
+  vec3 base=STONE*alb*mix(vec3(1.), vec3(0.80,0.79,0.76), joint*0.55);
+  // sun: pool-wall shadow on the left, falling-drop shadow with a focused core
+  float wall=smoothstep(-1.66,-1.30,S.x+0.10*S.y);
+  float sun=0.40*wall, shade=0.;
+  if(uFallA>0.){
+    vec2 c=uDrop+uSun*(uFallZ+0.12); float rs=0.022+0.05*uFallZ; float d2=dot(S-c,S-c);
+    float core=exp(-d2/(0.12*rs*rs))*(1.-0.6*uFallZ);
+    shade=uFallA*0.9*exp(-d2/(rs*rs));
+    sun*=1.-shade+uFallA*2.6*core;
+  }
+  vec3 lin=base*WATER*((0.38-(uFallA>0.?0.24*shade:0.))+sun*I);
+  // the falling drop itself, a tiny lens seen from above (soft while near the lens of the camera)
+  if(uFallA>0.){
+    float rb=0.016*(1.+1.6*uFallZ), blur=0.002+0.012*uFallZ;
+    vec2 b=(S-uDrop)/rb; float rr=length(b);
+    float mask=uFallA*(1.-smoothstep(1.-blur/rb,1.+blur/rb,rr))*(1.-0.2*uFallZ);
+    float rim=smoothstep(0.35,1.0,rr);
+    vec3 inside=base*WATER*(0.30+0.9*exp(-dot(b-vec2(0.25,-0.2),b-vec2(0.25,-0.2))*3.))*(1.-0.75*rim*rim)
+               + vec3(1.0,0.99,0.97)*1.4*exp(-dot(b+vec2(0.36,-0.30),b+vec2(0.36,-0.30))*40.);
+    lin=mix(lin,inside,mask);
+  }
+  // light vignette from the room
+  vec2 v=S*vec2(0.52,0.85); lin*=1.-0.16*dot(v,v);
+  o=vec4(finish(lin,gl_FragCoord.xy),1.);
+}`;
+
+const CURV = +(new URLSearchParams(location.search).get('curv') || 3.2);
+const G = XM.gpu();
+const prog0 = G.program(FRAG);
+function frame(t) {
+  const tau = t - TD;
+  // fall: from near the camera, accelerating (z = z0·(1 − u²))
+  const u = prog(t, 2.25, TD), fallZ = 1 - u * u;
+  const fallA = t < TD ? smooth(prog(t, 2.25, 2.6)) : 0;
+  const tr = Math.max(0, tau);
+  const ringAmp = smooth(prog(tr, 0, 0.08)) * Math.exp(-tr / 2.3);
+  const hole = 0.95 * smooth(clamp(tr / 1.7)) * (1 - smoother(prog(tr, 1.7, 5.6)));
+  const tear = tau > 0 ? 0.8 * smooth(prog(tr, 0, 0.3)) : 0;
+  G.run(prog0, {
+    uT: t, uTau: tau, uFallZ: fallZ, uFallA: fallA, uTear: tear, uHole: hole, uDecay: ringAmp, uCurv: CURV,
+    uW: { type: '4fv', value: WAVES.w }, uA: { type: '1fv', value: WAVES.a },
+    uR: { type: '4fv', value: new Float32Array(RINGS.flat()) }, uDrop: DROP, uSun: SUN,
+  });
+  G.finish();
+}
+
+// ---------------- score ----------------
+// Key: B, open and modal (B · F♯ · C♯ · E). Water wash and air throughout; one drop: a plink, a low
+// "tok" and a tuned water-glass strike; each ring packet answers with a soft tone that widens in the
+// stereo field; the knitting net resolves on a quiet bowed fifth.
+async function renderAudio({ sampleRate }) {
+  const A = XM.audio, M = A.mix(sampleRate, D);
+  const air = A.noiseArr(Math.ceil(11 * sampleRate), 5, 'pink'), wash = A.noiseArr(Math.ceil(11 * sampleRate), 9, 'brown');
+  const hz = m => 440 * 2 ** ((m - 69) / 12);
+  A.wash(M, wash, 0, D, 'lowpass', 520, 0.7, [[0, 0], [1.0, 0.22], [3.2, 0.2], [3.3, 0.28], [5, 0.22], [9.2, 0.2], [9.8, 0]]);
+  A.wash(M, air, 0, D, 'bandpass', 1400, 0.6, [[0, 0], [1.2, 0.03], [8.8, 0.03], [9.7, 0]]);
+  // bed: soft bowed fifth, then shimmer of the net
+  [[47, 0.045, -0.25], [54, 0.032, 0.25]].forEach(([m, a, p]) => A.bowed(M, air, 0.2, 8.6, hz(m), a, { pan: p, swell: 1.6, release: 1.0, breath: 0.08, vib: 0.25 }));
+  A.bowed(M, air, 0.8, 3.0, hz(78), 0.016, { pan: [[0.8, -0.3], [3.0, 0.25]], swell: 1.2, release: 0.6, breath: 0.25, vib: 3.8 });
+  // the drop falling: a tiny rising glint as it nears the surface
+  A.tone(M, 2.55, TD, t => hz(90) * (1 + 0.04 * prog(t, 2.55, TD)), t => 0.006 * smooth(prog(t, 2.55, 3.0)) * (1 - smooth(prog(t, 3.1, TD))), 0.22);
+  // impact
+  A.plink(M, TD, 980, 0.30, { rise: 1.6, dur: 0.07, pan: 0.22 });
+  A.tone(M, TD, TD + 0.5, t => 150 * (1 - 0.25 * prog(t, TD, TD + 0.2)), t => 0.20 * Math.exp(-(t - TD) * 18) * smooth(prog(t, TD, TD + 0.004)), 0.18);
+  A.glass(M, TD + 0.005, hz(71), 0.12, { decay: 3.6, pan: 0.2, ratios: [1, 2.0, 3.01, 4.2], weights: [1, 0.25, 0.1, 0.04] });
+  // ring packets travelling outward: three answering tones, widening
+  [[78, 3.42, 0.055], [83, 3.75, 0.04], [85, 4.15, 0.03]].forEach(([m, t0, a], i) => {
+    A.bowed(M, air, t0, t0 + 1.2, hz(m), a, { pan: [[t0, 0.2], [t0 + 2.5, i % 2 ? -0.75 : 0.8]], swell: 0.35, release: 1.6, breath: 0.2, vib: 4.4 });
+  });
+  // knitting back (≈5–8.8 s): slow rising inner voice, resolving on a bowed B/F♯ with a soft chime
+  A.bowed(M, air, 5.0, 8.4, hz(66), 0.03, { pan: -0.3, swell: 1.8, release: 1.2, breath: 0.15, vib: 4.0 });
+  A.bowed(M, air, 6.2, 8.5, hz(73), 0.024, { pan: 0.35, swell: 1.6, release: 1.2, breath: 0.15, vib: 4.6 });
+  A.glass(M, 8.75, hz(83), 0.05, { decay: 1.3, pan: 0.15 });
+  A.glass(M, 8.78, hz(71), 0.045, { decay: 1.5, pan: -0.1 });
+  const buf = await A.render(M, { seed: 23, room: 3.8, wet: 0.5, bright: 0.4, fade: [9.1, 9.75] });
+  return A.master(buf, { lufs: -18, ceiling: -1.7, fadeOut: 0.06 });
+}
+
+XM.film({ duration: D, poster: 4.4, frame, audio: renderAudio });
+</script>
+</body></html>

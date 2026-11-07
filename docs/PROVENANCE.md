@@ -11,7 +11,13 @@ No upstream source, proprietary brand assets, reference-film collection, fonts, 
 
 ## Local work
 
-X Motion’s instructions, tooling and First Light scene are original contributions under the repository MIT license. The example uses procedural shapes and system fonts; no stock footage or cloned voice. Its visual identity is an example, not a mandate for future client work.
+X Motion's instructions, tooling, theme skills and films are original contributions under the repository MIT license. Every film is procedural code: shaders, canvas drawing and Web Audio synthesis with seeded noise and synthetic reverb. There are no stock images, footage, samples, recorded sounds, cloned voices or third-party textures. The Orbit theme takes its emotional starting point from the owner's own X-Agent console login sequence, described in words and rebuilt from scratch; no code or assets were copied from it.
+
+The retired studies XM-0001 to XM-0003 (First Light, Signal Weave, Weight of Type) remain in Git history and the catalog as discarded records.
+
+## Fonts
+
+The gallery self-hosts Geist and Geist Mono variable fonts from the `geist` npm package (version 1.9.2) by Vercel, under the SIL Open Font License 1.1. The license ships beside them as `site/fonts/OFL.txt`. The films use no fonts.
 
 ## Runtime dependencies
 

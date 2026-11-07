@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stroke · X Motion Sumi</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;background:#000;overflow:hidden} canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="film" width="1920" height="1080"></canvas>
+<script src="kit.js"></script>
+<script>
+'use strict';
+// Stroke: one open enso in a single breath, then a small abstract vermilion seal.
+// Cue map (seconds): 0.30-1.05 inhale | 1.10 touchdown | 1.15-3.25 brush hush, drier and grainier | 3.3-4.6 stillness
+// 4.55 seal shadow approaches | 5.00 seal lands: wooden tok + low gong | 6.3-7.7 gong fades | silence from 7.86.
+const D = 8, T_DOWN = 1.15, T_STROKE = 2.1, T_SEAL = 5.0;
+window.motion = { width: 1920, height: 1080, duration: D, fps: 30, poster: 7.0 };
+
+const gl = XM.initGL(document.getElementById('film'));
+const prog = XM.program(gl, `
+uniform float uHead;      // stroke progress 0..1 (brush head)
+uniform float uZoom;
+uniform float uSeal;      // time since seal contact (negative before)
+const vec2 C = vec2(0.80, 0.505);
+const float R0 = 0.300;
+const float TH0 = 2.03;          // start angle (radians, y-down screen space)
+const float SPAN = 5.80;         // ~332 degrees: the circle stays open
+const float TDOWN = ${T_DOWN.toFixed(3)}, TSTROKE = ${T_STROKE.toFixed(3)};
+const vec2 SEAL = vec2(1.515, 0.805);
+
+float radiusAt(float a, float u){
+  return R0 * (1.0 + 0.022 * sin(a * 2.0 + 1.3) + 0.012 * sin(a * 3.0 + 0.4)) + 0.014 * u;
+}
+float halfWidth(float u){
+  float w = mix(0.036, 0.050, smoothstep(0.0, 0.045, u));
+  w = mix(w, 0.033, smoothstep(0.045, 0.30, u));
+  w = mix(w, 0.026, smoothstep(0.30, 0.52, u));
+  w = mix(w, 0.031, smoothstep(0.52, 0.68, u));   // second press on the descent
+  w = mix(w, 0.006, smoothstep(0.70, 1.0, u));
+  return w;
+}
+// time at which the brush head passed progress u (inverse of the head curve in JS)
+float passTime(float u){ return TDOWN + TSTROKE * pow(clamp(u, 0.0, 1.0), 1.0 / 1.35); }
+
+void main(){
+  vec2 px = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec2 focus = C * uRes.y;
+  vec2 sp = (px - focus) / uZoom + focus;            // paper-space pixel
+  vec2 P = sp / uRes.y;                               // frame-height units
+  vec4 pp = paperAt(sp, 0.0);
+
+  // light: soft window from the upper left, gentle vignette
+  vec2 lq = (P - vec2(0.55, 0.22)) * vec2(0.52, 0.78);
+  float light = clamp(1.05 - dot(lq, lq) * 1.25, 0.0, 1.0);
+  light *= 1.0 - 0.10 * smoothstep(0.6, 1.25, length((P - vec2(0.889, 0.5)) * vec2(0.62, 1.0)));
+  vec3 col = washi(pp, light);
+
+  // ---- enso ----
+  vec2 dv = P - C;
+  float ang = atan(dv.y, dv.x);
+  float ap = mod(ang - TH0, 6.2831853);
+  float gapMid = SPAN + (6.2831853 - SPAN) * 0.5;
+  float u = ap < gapMid ? ap / SPAN : (ap - 6.2831853) / SPAN;
+  float uc = clamp(u, 0.0, 1.0);
+  float aU = TH0 + uc * SPAN;
+  float r = radiusAt(aU, uc);
+  float dist = length(dv) - r;
+  float w = halfWidth(uc) * (1.0 + 0.16 * (n1(vec2(uc * 1.7, 0.31)) - 0.5));
+  float L = SPAN * R0;                                // arc length of full stroke (H units)
+  float across = dist / w;
+  float sBeyond = 0.0;                                // arc distance beyond the ends
+  if (u < 0.0) sBeyond = -u * L;
+  if (u > 1.0) sBeyond = (u - 1.0) * L;
+  float capW = u < 0.0 ? w * 0.75 : w * 2.6;
+  float acr = length(vec2(across, sBeyond / capW));
+
+  float wet = 1.0 - smoothstep(0.26, 0.80, uc);
+  float dry = smoothstep(0.42, 1.0, uc);
+  float tp = max(uT - passTime(uc), 0.0);
+  float drawn = step(0.0, uT - TDOWN + 0.06);
+
+  // edge: feathered into fibres where wet, bleeding a little over time
+  vec4 ppb = paperAt(sp, 1.2);
+  float bleed = wet * (0.03 + 0.09 * sqrt(min(tp, 2.5) / 2.5)) * (0.45 + pp.a) + wet * 0.07 * ppb.g;
+  float wobble = (n2(vec2(uc * 9.0, across > 0.0 ? 0.13 : 0.61)) - 0.5) * 0.16 + (n1(vec2(uc * 22.0, across > 0.0 ? 0.4 : 0.8)) - 0.5) * 0.025;
+  float edge = 1.0 + bleed + wobble - 0.05 * dry;
+  float soft = 0.045 / max(w * 32.0, 0.25) + 0.02;
+  float body = 1.0 - smoothstep(edge - soft, edge, acr);
+
+  // brush head: rounded front, only where the brush has passed
+  float front = (u - uHead) * L;
+  float headShape = w * 0.8 * (sqrt(max(0.0, 1.0 - across * across)) - 1.0);
+  float headMask = 1.0 - smoothstep(-0.0012, 0.0012, front - headShape);
+  if (uHead >= 0.999) headMask = 1.0;
+
+  // dry brush: bristle lanes that persist along the stroke, broken by paper tooth
+  float s = uc * L;
+  float lanes = n1(vec2(across * 0.62 + 3.1, s * 0.8));
+  lanes = 0.6 * lanes + 0.4 * n2(vec2(across * 1.3 + 1.7, s * 1.9));
+  float keep = lanes * 0.95 + (mix(pp.b, ppb.b, 0.6) - 0.5) * 0.55 + 0.25;
+  float thresh = mix(0.0, 0.92, dry) + 0.18 * smoothstep(0.55, 1.0, abs(across)) * dry;
+  float dryMask = smoothstep(thresh - 0.07, thresh + 0.07, keep);
+  dryMask = mix(1.0, dryMask, smoothstep(0.30, 0.55, uc));
+
+  // tone: heavy pooled ink at touchdown, granulating mid greys, rim darkening while wet
+  float dens = mix(0.66, 1.32, wet);
+  float hair = n1(vec2(across * 1.9 + 5.3, s * 0.35));
+  dens *= mix(1.0, 0.86 + 0.28 * hair, 0.5 + 0.5 * (1.0 - wet));   // bristle striations along the stroke
+  dens *= 1.0 + 0.25 * exp(-uc * 28.0);
+  dens *= 0.86 + 0.28 * fbm3(P * 1.6 + 0.2);                       // pigment granulation
+  dens *= 0.92 + 0.16 * smoothstep(0.35, 0.85, pp.b) * (1.0 - wet);
+  float rim = smoothstep(0.55, 1.0, acr / edge) * smoothstep(0.1, 0.6, uc) * wet * 0.35 * (1.0 - exp(-tp * 1.2));
+  float halo = wet * 0.06 * (1.0 - smoothstep(edge, edge + 0.16 + bleed, acr)) * (1.0 - body); // faint water halo
+  halo *= smoothstep(0.35, 0.75, ppb.a * 0.7 + ppb.g * 0.6 + n2(P * 7.0) * 0.4);
+  float ink = (body * (dens + rim) * dryMask + halo * smoothstep(0.0, 1.5, tp)) * headMask * drawn;
+  vec3 inked = inkOver(col, ink);
+  // wet sheen: faint lift on the side facing the light, fading as the ink dries
+  float sheen = wet * body * exp(-tp / 1.3) * smoothstep(0.1, 0.9, -across * 0.7 + 0.4) * 0.035;
+  col = inked + sheen * headMask * drawn;
+
+  // ---- seal ----
+  vec2 sq = (P - SEAL);
+  float rot = -0.035;
+  sq = mat2(cos(rot), -sin(rot), sin(rot), cos(rot)) * sq;
+  float hs = 0.031;
+  vec2 qd = abs(sq) - vec2(hs);
+  float wob = (n2(P * 9.0) - 0.5) * 0.0016;
+  float box = length(max(qd, 0.0)) + min(max(qd.x, qd.y), 0.0) - 0.0025 + wob;
+  float ringR = 0.0150, ringT = 0.0030;
+  float ra = atan(sq.y, sq.x);
+  float ringGap = smoothstep(0.42, 0.56, abs(mod(ra - 2.03 + 3.14159, 6.2831853) - 3.14159)); // gap echoes the enso
+  float ring = (1.0 - smoothstep(ringT - 0.0008, ringT + 0.0008, abs(length(sq) - ringR))) * ringGap;
+  float aaS = 1.2 / uRes.y;
+  float sealShape = (1.0 - smoothstep(-aaS, aaS, box)) * (1.0 - ring);
+  float cover = smoothstep(0.12, 0.30, pp.b * 0.8 + n1(P * 14.0) * 0.5 + 0.08);
+  cover *= 0.86 + 0.14 * n2(P * 5.0);
+  cover *= 1.0 - 0.22 * smoothstep(0.2, 1.0, dot(sq / hs, vec2(0.55, -0.6)));   // lighter pressure at one corner
+  float landed = step(0.0, uSeal);
+  vec3 verm = lin(vec3(0.784, 0.216, 0.176));
+  float wetS = exp(-max(uSeal, 0.0) / 0.6);
+  vec3 vcol = mix(verm, verm * 0.86, wetS * 0.5);
+  vec3 sealCol = col * (vcol / lin(vec3(0.93, 0.89, 0.81)));        // pigment multiplies the paper
+  col = mix(col, sealCol, sealShape * cover * landed);
+
+  // shadow of the unseen seal block as it descends and lifts
+  float approach = smoothstep(-0.45, -0.02, uSeal) * (1.0 - smoothstep(0.0, 0.32, uSeal));
+  float blur = mix(0.030, 0.006, smoothstep(-0.45, 0.0, uSeal)) + 0.03 * smoothstep(0.0, 0.32, uSeal);
+  vec2 off = vec2(0.010, 0.012) * (1.0 - smoothstep(-0.45, 0.0, uSeal)) + vec2(0.006, 0.008) * smoothstep(0.0, 0.32, uSeal);
+  vec2 sh = abs(P - SEAL - off) - vec2(hs + 0.006);
+  float sd = length(max(sh, 0.0)) + min(max(sh.x, sh.y), 0.0);
+  float shadow = (1.0 - smoothstep(-blur, blur, sd)) * approach * 0.16;
+  col *= 1.0 - shadow;
+
+  outColor = vec4(dither(srgb(col)), 1.0);
+}`);
+
+function frame(t) {
+  const x = XM.clamp((t - T_DOWN) / T_STROKE);
+  const head = t < T_DOWN ? -0.01 : Math.pow(x, 1.35);
+  prog.draw({ uT: t, uHead: head, uZoom: 1 + 0.028 * (t / D), uSeal: t - T_SEAL });
+}
+XM.run({ duration: D, draw: frame });
+
+window.renderAudio = async function ({ sampleRate }) {
+  const ctx = new OfflineAudioContext(2, Math.ceil(D * sampleRate), sampleRate), A = XM.audio;
+  const m = A.master(ctx, { seed: 41, reverbSeconds: 4.2, decay: 1.25, gain: 0.6, fade: [7.05, 7.86] });
+  // quiet room / paper tone
+  A.noiseLayer(ctx, m, { t1: D, seed: 3, color: 'brown', type: 'lowpass', freq: 380, q: 0.3, wet: 0.1,
+    pts: [[0.4, 0.035], [7.0, 0.035], [7.9, 0]] });
+  // inhale before the stroke (leads the gesture)
+  const inh = A.noiseLayer(ctx, m, { t0: 0.2, t1: 1.2, seed: 5, color: 'pink', freq: 900, q: 0.8, wet: 0.25,
+    pts: [[0.3, 0, 'set'], [0.85, 0.11], [1.05, 0.0]] });
+  inh.fl.frequency.setValueAtTime(600, 0.3); inh.fl.frequency.linearRampToValueAtTime(1500, 1.05);
+  // brush touchdown: soft, wet, low
+  A.noiseLayer(ctx, m, { t0: 1.05, t1: 1.6, seed: 8, color: 'brown', type: 'lowpass', freq: 520, q: 0.7, wet: 0.3,
+    pts: [[1.12, 0, 'set'], [1.135, 0.5], [1.45, 0.0]] });
+  // brush hush: pans with the brush head around the circle, gets drier and grainier
+  const sr = sampleRate, t0 = T_DOWN, t1 = T_DOWN + T_STROKE + 0.12, n = Math.ceil((t1 - t0) * sr);
+  const hush = ctx.createBuffer(2, n, sr), rnd = XM.mulberry32(77);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = hush.getChannelData(ch); let lp = 0, gs = 0;
+    for (let i = 0; i < n; i++) {
+      const t = t0 + i / sr, x = XM.clamp((t - T_DOWN) / T_STROKE), u = Math.pow(x, 1.35);
+      const dry = XM.smooth(0.4, 1.0, u), w = rnd() * 2 - 1;
+      lp += (w - lp) * (0.25 + 0.5 * dry);
+      const spike = rnd() < 0.002 + 0.02 * dry ? (rnd() * 2 - 1) * 0.35 * dry : 0;   // bristles catching fibre
+      gs = gs * 0.86 + spike;
+      const speed = 0.45 + 0.9 * Math.pow(x, 0.35);
+      const env = XM.smooth(0, 0.06, t - t0) * (1 - XM.smooth(T_STROKE - 0.12, T_STROKE + 0.1, t - t0));
+      d[i] = (lp * speed + gs) * env * 0.5;
+    }
+  }
+  const hs = ctx.createBufferSource(); hs.buffer = hush;
+  const hb = ctx.createBiquadFilter(); hb.type = 'bandpass'; hb.frequency.value = 2400; hb.Q.value = 0.55;
+  const hg = ctx.createGain(); hg.gain.value = 0.34;
+  hs.connect(hb); hb.connect(hg);
+  const pan = A.route(ctx, m, hg, { wet: 0.22 });
+  pan.pan.setValueAtTime(0.55 * Math.cos(2.03) - 0.15, 0);
+  for (let k = 0; k <= 30; k++) {
+    const x = k / 30, u = Math.pow(x, 1.35), a = 2.03 + u * 5.80;
+    pan.pan.linearRampToValueAtTime(0.55 * Math.cos(a) - 0.15, T_DOWN + x * T_STROKE);
+  }
+  hs.start(t0);
+  // exhale tail as the brush lifts
+  A.noiseLayer(ctx, m, { t0: 3.0, t1: 4.4, seed: 12, color: 'pink', freq: 700, q: 0.6, wet: 0.35,
+    pts: [[3.1, 0, 'set'], [3.35, 0.05], [4.3, 0.0]] });
+  // seal: block shadow breath, wooden contact, low gong (meets the seal)
+  A.noiseLayer(ctx, m, { t0: 4.4, t1: 5.1, seed: 15, color: 'pink', freq: 380, q: 0.9, wet: 0.2,
+    pts: [[4.5, 0, 'set'], [4.97, 0.06], [5.01, 0.0]] });
+  const tok = ctx.createOscillator(); tok.frequency.setValueAtTime(410, T_SEAL); tok.frequency.exponentialRampToValueAtTime(240, T_SEAL + 0.05);
+  const tg = ctx.createGain(); A.env(tg.gain, [[T_SEAL, 0, 'set'], [T_SEAL + 0.003, 0.22], [T_SEAL + 0.09, 0.0001, 'exp']]);
+  tok.connect(tg); A.route(ctx, m, tg, { pan: 0.45, wet: 0.35 }); tok.start(T_SEAL); tok.stop(T_SEAL + 0.12);
+  A.gong(ctx, m, { t: T_SEAL + 0.015, f: 58, level: 0.42, pan: 0.18, wet: 0.55, end: [6.3, 7.7] });
+  return await ctx.startRendering();
+};
+</script>
+</body>
+</html>

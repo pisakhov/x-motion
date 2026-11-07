@@ -1,11 +1,31 @@
 {
-  "version": 1,
+  "version": 2,
+  "themes": [
+    {
+      "slug": "orbit",
+      "title": "Orbit",
+      "tagline": "Titanium, starlight and the curve of the Earth.",
+      "skill": "x-motion-orbit"
+    },
+    {
+      "slug": "prism",
+      "title": "Prism",
+      "tagline": "Light, glass and colour at rest.",
+      "skill": "x-motion-prism"
+    },
+    {
+      "slug": "sumi",
+      "title": "Sumi",
+      "tagline": "Ink, paper and breath.",
+      "skill": "x-motion-sumi"
+    }
+  ],
   "motions": [
     {
       "id": "XM-0001",
       "title": "First Light",
       "description": "An aperture opens into a restrained champagne-metal title. Original synthesized sound.",
-      "status": "review",
+      "status": "discarded",
       "duration": 6,
       "width": 960,
       "height": 540,
@@ -16,13 +36,14 @@
       "parentId": null,
       "createdAt": "2026-11-06",
       "source": "examples/first-light/index.html",
-      "hasAudio": true
+      "hasAudio": true,
+      "theme": null
     },
     {
       "id": "XM-0002",
       "title": "Signal Weave",
       "description": "Independent cobalt signal paths cohere into a woven field. Deliberately silent.",
-      "status": "review",
+      "status": "discarded",
       "duration": 7,
       "width": 960,
       "height": 540,
@@ -33,13 +54,14 @@
       "parentId": null,
       "createdAt": "2026-11-06",
       "source": "examples/signal-weave/index.html",
-      "hasAudio": false
+      "hasAudio": false,
+      "theme": null
     },
     {
       "id": "XM-0003",
       "title": "Weight of Type",
       "description": "Oversized typography acquires mass through compression, rhythm and release. Deliberately silent.",
-      "status": "review",
+      "status": "discarded",
       "duration": 7,
       "width": 960,
       "height": 540,
@@ -50,8 +72,274 @@
       "parentId": null,
       "createdAt": "2026-11-06",
       "source": "examples/weight-of-type/index.html",
-      "hasAudio": false
+      "hasAudio": false,
+      "theme": null
+    },
+    {
+      "id": "XM-0004",
+      "title": "Passage",
+      "description": "A titanium X unlatches into deep space as a blue planet rises toward first sunlight.",
+      "status": "review",
+      "duration": 9,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0004.mp4",
+      "poster": "/media/XM-0004.webp",
+      "preview": "/media/XM-0004-preview.mp4",
+      "videoSha256": "5277e50c5bd45b52b7ace5962c29b1586858d301c1d9b1421c4e693a1459d341",
+      "posterSha256": "3192a2e628c827c1d8b9e433627aa0c220c1b6d69af2202111b1f28c79224bc8",
+      "previewSha256": "82a1f82360cf235c1e77ecf025d7aaa43a518ec3e60e424dcd21960c8dc66d87",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/orbit/passage.html",
+      "hasAudio": true,
+      "theme": "orbit",
+      "slug": "passage",
+      "prompt": "A brushed-titanium X seals the frame like a vault door. It unlatches with a soft metallic click, its four arms part, and we fall through into deep space. A blue planet rises from below, city lights glittering on its night side, until the sun crests the limb in a single clean flare and a warm chord resolves. 9 seconds, 1920×1080, original synthesized score.",
+      "skills": [
+        "x-motion",
+        "x-motion-orbit"
+      ],
+      "model": "claude-opus-5-5"
+    },
+    {
+      "id": "XM-0005",
+      "title": "Terminator Line",
+      "description": "One unbroken glide along the edge of night, cities amber and an aurora breathing.",
+      "status": "review",
+      "duration": 10,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0005.mp4",
+      "poster": "/media/XM-0005.webp",
+      "preview": "/media/XM-0005-preview.mp4",
+      "videoSha256": "2aab9aeab7acba9018a9dc95448365ccfe53800aa035728024b141115073424b",
+      "posterSha256": "6ed09e5c94a68b901310f4a9ddcbc9369c72743a100d4ab3f4cc781de128c663",
+      "previewSha256": "4f083613f0d2e6ecb10a91f600c53464ebf67cd0efa2b4cce67dd4f6b28d0a78",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/orbit/terminator.html",
+      "hasAudio": true,
+      "theme": "orbit",
+      "slug": "terminator",
+      "prompt": "Low orbit, slow and silent. We glide along the line where night becomes day. Cities burn amber on the dark side, thin cloud bands catch the first light, and a faint green aurora breathes near the horizon. The camera never cuts; the planet does the moving. End as sunlight reaches the ground below. 10 seconds, 1920×1080, low drone score.",
+      "skills": [
+        "x-motion",
+        "x-motion-orbit"
+      ],
+      "model": "claude-opus-5-5"
+    },
+    {
+      "id": "XM-0006",
+      "title": "Eclipse",
+      "description": "A dark moon swallows the sun, the corona unfolds, and the diamond ring breaks free.",
+      "status": "review",
+      "duration": 10,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0006.mp4",
+      "poster": "/media/XM-0006.webp",
+      "preview": "/media/XM-0006-preview.mp4",
+      "videoSha256": "60153f2db3e25eb404cf96204d6cd4c4ecd7f337b413a2b82ca387ff694da18c",
+      "posterSha256": "2af4e67dcdd499153511553d20c17243e0daa00ef162f3431863a6d8b0abb286",
+      "previewSha256": "54fa1bb51cbeb96aa1f1eb85bcef3c0778c45db11ddf98112b834bdba7f37939",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/orbit/eclipse.html",
+      "hasAudio": true,
+      "theme": "orbit",
+      "slug": "eclipse",
+      "prompt": "Deep black. A thin crescent of sunlight is swallowed as a dark moon slides across the sun. At totality the corona unfolds in fine pearl filaments and the stars come out. A single bead of light breaks free on the far edge: the diamond ring. Then the dark lifts. 10 seconds, 1920×1080, near silence that blooms into one bell tone at the diamond ring.",
+      "skills": [
+        "x-motion",
+        "x-motion-orbit"
+      ],
+      "model": "claude-opus-5-5"
+    },
+    {
+      "id": "XM-0007",
+      "title": "Dispersion",
+      "description": "A white beam meets a glass prism and fans into a slow, sweeping spectrum.",
+      "status": "review",
+      "duration": 9,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0007.mp4",
+      "poster": "/media/XM-0007.webp",
+      "preview": "/media/XM-0007-preview.mp4",
+      "videoSha256": "ddc985f66aadf473fe71d337acf1935054cdbe409e7618a540e31a8369336956",
+      "posterSha256": "87cba1b3dd7fa7e7d154ab5abc239862f047364a75918563eb9bf41ef1acaeca",
+      "previewSha256": "c1bb195d2de8606ecc17438647d1cb3674b5461d2f1afd41a5996dbae61d0ba7",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/prism/dispersion.html",
+      "hasAudio": true,
+      "theme": "prism",
+      "slug": "dispersion",
+      "prompt": "A pale studio, paper-white and still. A narrow beam of white light crosses the frame and strikes a triangular glass prism. Inside the glass it bends; leaving it, it fans into a full spectrum that paints the floor in clean bands of colour. The prism turns a few degrees and the rainbow sweeps like a slow hand. 9 seconds, 1920×1080, glassy harmonic score.",
+      "skills": [
+        "x-motion",
+        "x-motion-prism"
+      ],
+      "model": "claude-opus-5-5"
+    },
+    {
+      "id": "XM-0008",
+      "title": "Caustics",
+      "description": "Sunlit caustics on a stone pool floor tear apart at one drop and knit back.",
+      "status": "review",
+      "duration": 10,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0008.mp4",
+      "poster": "/media/XM-0008.webp",
+      "preview": "/media/XM-0008-preview.mp4",
+      "videoSha256": "911f8b432a95bda66d9b31420066699e8423177f60edbdb0b2b2722db750eced",
+      "posterSha256": "61d524161aab91da46dbf6a0b554d7fc21db94a7f24450f972b17fbcf61d230f",
+      "previewSha256": "01d33ca243524f5301e2f9d8d19562484630ba5b3ad527bc0fe3706f5d8b0303",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/prism/caustics.html",
+      "hasAudio": true,
+      "theme": "prism",
+      "slug": "caustics",
+      "prompt": "Overhead view of a shallow pool with a pale stone floor. Sunlight through the water draws a living net of caustics. A single drop falls; rings travel outward, the net tears apart and slowly knits back together. Clear, cool, meditative. 10 seconds, 1920×1080, one drop and soft resonant water tones.",
+      "skills": [
+        "x-motion",
+        "x-motion-prism"
+      ],
+      "model": "claude-opus-5-5"
+    },
+    {
+      "id": "XM-0009",
+      "title": "Lens",
+      "description": "A glass sphere rolls over a fine grid, bending and flipping it with a rainbow edge.",
+      "status": "review",
+      "duration": 9,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0009.mp4",
+      "poster": "/media/XM-0009.webp",
+      "preview": "/media/XM-0009-preview.mp4",
+      "videoSha256": "4037728bd1bb9fdb8ecd25c5c254864cd88aaf95dfa342ae66127e497a59379f",
+      "posterSha256": "900856729a632d12429d9f80833ed22af84db5a82c6e61247925c9f7269c8ab3",
+      "previewSha256": "31c534105a45ee8d3cc139ae9b0a1d0cedd36d30756bbc8f97a524085a20b451",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/prism/lens.html",
+      "hasAudio": true,
+      "theme": "prism",
+      "slug": "lens",
+      "prompt": "A flawless glass sphere rolls slowly across a sheet of fine printed grid lines. Wherever it passes, the grid swells, bends and flips upside down inside the glass, edged with a thin rainbow of chromatic aberration. Precise, minimal, quietly satisfying. 9 seconds, 1920×1080, a soft rolling tone and a tuned chime as it stops.",
+      "skills": [
+        "x-motion",
+        "x-motion-prism"
+      ],
+      "model": "claude-opus-5-5"
+    },
+    {
+      "id": "XM-0010",
+      "title": "Bloom",
+      "description": "One drop of ink blooms in warm water, settles into a flower and dissolves.",
+      "status": "review",
+      "duration": 10,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0010.mp4",
+      "poster": "/media/XM-0010.webp",
+      "preview": "/media/XM-0010-preview.mp4",
+      "videoSha256": "8f836b25b03882e2f141fafd817b312bb4302dbdbe1afb4bebec4a1ce78d9760",
+      "posterSha256": "e2f3fd8635c13a022cc8279828cead03d209a6bc282c40514d188ee4b916e20f",
+      "previewSha256": "84fc993966934adcb6b62b4eda1f5261d85161370b641986f11f65d67bd45f39",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/sumi/bloom.html",
+      "hasAudio": true,
+      "theme": "sumi",
+      "slug": "bloom",
+      "prompt": "A single drop of black ink falls into clear water lit by warm rice-paper light. It blooms into soft tendrils that curl, split and drift like smoke, slowly settling into the shape of a flower before dissolving to grey. 10 seconds, 1920×1080, the sound of the drop and a breathy bamboo-flute tone.",
+      "skills": [
+        "x-motion",
+        "x-motion-sumi"
+      ],
+      "model": "claude-opus-5-5"
+    },
+    {
+      "id": "XM-0011",
+      "title": "Stroke",
+      "description": "An unseen brush draws an open enso in one breath, then a vermilion seal lands.",
+      "status": "review",
+      "duration": 8,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0011.mp4",
+      "poster": "/media/XM-0011.webp",
+      "preview": "/media/XM-0011-preview.mp4",
+      "videoSha256": "13aa5b40cc73dee2657198ed49f3c1351c276036541d050030c8d32caefa5e00",
+      "posterSha256": "4641b823476d6494e283d375ef8c88fa3b2d959e06d93441621d64fdf7ed023a",
+      "previewSha256": "4d31ab8008d28faacaaaad1079086985becac2f5ad38cfcb56806a63f18e32ec",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/sumi/stroke.html",
+      "hasAudio": true,
+      "theme": "sumi",
+      "slug": "stroke",
+      "prompt": "Textured washi paper, warm and empty. An unseen brush draws one continuous enso circle in a single breath: heavy wet ink at the start, dry bristle streaks as it runs out, the circle left deliberately open. A small abstract vermilion seal lands in the corner. 8 seconds, 1920×1080, the hush of a brush and one low gong.",
+      "skills": [
+        "x-motion",
+        "x-motion-sumi"
+      ],
+      "model": "claude-opus-5-5"
+    },
+    {
+      "id": "XM-0012",
+      "title": "Mist",
+      "description": "A slow drift through receding ink-wash ridges, a crane and one vermilion sun.",
+      "status": "review",
+      "duration": 12,
+      "width": 1920,
+      "height": 1080,
+      "video": "/media/XM-0012.mp4",
+      "poster": "/media/XM-0012.webp",
+      "preview": "/media/XM-0012-preview.mp4",
+      "videoSha256": "77bed53390f51049c4c4aa8b2da9166d0e2857949f22acac5fcf33d091f9504e",
+      "posterSha256": "18e9cbec6b6b1f0ce7b33e7822e2a48e69a09d07fd65503796a1f3ade33f0cab",
+      "previewSha256": "58b63ef6953d7ecf7b398b91923a7aed0d9dc8bcd1fd2e5da348757c35510206",
+      "parentId": null,
+      "createdAt": "2026-11-07",
+      "source": "examples/sumi/mist.html",
+      "hasAudio": true,
+      "theme": "sumi",
+      "slug": "mist",
+      "prompt": "Layers of ink-wash mountains recede into mist, each ridge paler than the last. The camera drifts slowly forward through them as fog rolls between the peaks. A single crane crosses the far sky. Monochrome, with one vermilion sun low in the haze. 12 seconds, 1920×1080, wind and a sparse plucked-string melody.",
+      "skills": [
+        "x-motion",
+        "x-motion-sumi"
+      ],
+      "model": "claude-opus-5-5"
     }
   ],
-  "feedback": []
+  "feedback": [
+    {
+      "id": "XM-0001",
+      "timestamp": "2026-11-06T23:41:32.000Z",
+      "previousStatus": "review",
+      "status": "discarded",
+      "note": "Owner did not like this film. Replaced by the themed collection."
+    },
+    {
+      "id": "XM-0002",
+      "timestamp": "2026-11-06T23:41:32.000Z",
+      "previousStatus": "review",
+      "status": "discarded",
+      "note": "Owner did not like this film. Replaced by the themed collection."
+    },
+    {
+      "id": "XM-0003",
+      "timestamp": "2026-11-06T23:41:32.000Z",
+      "previousStatus": "review",
+      "status": "discarded",
+      "note": "Owner did not like this film. Replaced by the themed collection."
+    }
+  ]
 }

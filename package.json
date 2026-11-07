@@ -2,7 +2,7 @@
   "name": "x-motion",
   "version": "0.1.0",
   "private": true,
-  "description": "Skill-first motion design for coding agents",
+  "description": "Short films made by coding agents, published with their prompts and skills",
   "type": "module",
   "license": "MIT",
   "engines": { "node": ">=22" },
@@ -14,8 +14,8 @@
     "test:http": "node scripts/test-http.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:browser": "RUN_RENDER_TESTS=1 node --test tests/render-browser.test.mjs",
-    "storyboard": "node scripts/render.mjs examples/first-light/index.html --out renders/first-light-board",
-    "render": "node scripts/render.mjs examples/first-light/index.html --out renders/first-light --video"
+    "storyboard": "node scripts/render.mjs examples/orbit/passage.html --out renders/passage-board --audio",
+    "render": "node scripts/render.mjs examples/orbit/passage.html --out renders/passage --video"
   },
   "devDependencies": { "playwright": "1.65.0" }
 }

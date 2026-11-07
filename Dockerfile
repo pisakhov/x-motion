@@ -1,6 +1,7 @@
 FROM node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 AS builder
 WORKDIR /app
-COPY scripts/catalog.mjs scripts/build-site.mjs ./scripts/
+COPY scripts/catalog.mjs scripts/build-site.mjs scripts/markdown.mjs scripts/site-pages.mjs ./scripts/
+COPY skills ./skills
 COPY data ./data
 COPY site ./site
 COPY gallery-media ./gallery-media

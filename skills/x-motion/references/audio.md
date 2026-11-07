@@ -30,7 +30,7 @@ Choose loudness and peak targets from delivery requirements; there is no single 
 
 Keep cues expressed in seconds or explicit frame indices with a documented frame rate. Avoid implicit conversions or rounding in multiple places. If external editing or muxing is needed, preserve the timeline start and account for any intentional offset.
 
-The HTML `renderFrame(tSeconds)` contract controls visuals. It does **not** promise audio recording or mixing. Confirm what the local renderer supports before planning export. If no audio pipeline is available, deliver a silent preview and cue map, clearly labeling audio as unfinished rather than implying it was embedded.
+The HTML `renderFrame(tSeconds)` contract controls visuals only. With the X Motion renderer, sound comes from an optional `window.renderAudio({ sampleRate })` that builds the score in an `OfflineAudioContext` and returns the rendered `AudioBuffer`; the renderer renders it twice to prove determinism, measures loudness, and muxes it into the film. Seed every noise buffer and impulse response. In other hosts, confirm what the pipeline supports before planning export. If no audio pipeline is available, deliver a silent preview and cue map, clearly labeling audio as unfinished rather than implying it was embedded.
 
 After final encoding:
 

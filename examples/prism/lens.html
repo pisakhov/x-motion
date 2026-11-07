@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lens · X Motion Prism</title>
+<style>html,body{margin:0;background:#000;overflow:hidden} canvas{display:block;width:100vw;height:100vh}</style>
+</head><body>
+<script src="kit.js"></script>
+<script>
+'use strict';
+// Lens. A glass ball rolls across printed grid paper and comes to rest. The ball is ray-traced
+// analytically (refract in, refract out, per colour channel), so the grid inverts inside it with a
+// thin chromatic fringe. Its shadow carries the focused caustic of a ball lens. All from t.
+const { clamp, mix, prog, smooth, smoother } = XM;
+const D = 9, R = 0.5;
+const T_STOP = 6.6;                               // rolling ends (constant deceleration)
+const P0 = [-4.7, -0.55], P1 = [0.78, 0.18];      // start (off frame, left) and rest point on the sheet
+const CAM = [0.1, 3.9, 5.2], TGT = [0.35, 0.0, -0.3], FOV = 34 * Math.PI / 180;
+const LIGHT = (() => { const v = [-0.52, 0.86, -0.42], l = Math.hypot(...v); return v.map(x => x / l); })();
+
+// Rolling with constant deceleration, then a tiny damped rock as it settles.
+function ballAt(t) {
+  const u = clamp(t / T_STOP), s = 1 - (1 - u) * (1 - u);              // distance fraction
+  const dir = [P1[0] - P0[0], P1[1] - P0[1]], L = Math.hypot(...dir);
+  const rock = t > T_STOP ? 0.028 * Math.exp(-(t - T_STOP) / 0.55) * Math.sin(2 * Math.PI * (t - T_STOP) / 1.05) : 0;
+  const d = s * L + rock;
+  const speed = t < T_STOP ? 2 * L * (1 - u) / T_STOP : 0;
+  return { x: P0[0] + dir[0] / L * d, z: P0[1] + dir[1] / L * d, speed, v0: 2 * L / T_STOP };
+}
+
+const HEAD = `#version 300 es
+precision highp float;
+out vec4 o;
+uniform vec3 uCam, uTgt, uC, uL; uniform float uFov;
+${XM.glslCommon}
+const float R = ${R.toFixed(3)};
+const vec3 PAPER = vec3(0.888, 0.863, 0.815);   // #f2efe9 linear
+const vec3 INK = vec3(0.110, 0.105, 0.095);     // #5d5b57 linear
+vec3 camRay(vec2 frag){
+  vec3 fw = normalize(uTgt-uCam), rt = normalize(cross(fw, vec3(0,1,0))), up = cross(rt, fw);
+  vec2 uv = (frag - vec2(960.,540.))/540.;
+  return normalize(fw/tan(uFov*0.5) + rt*uv.x + up*uv.y);
+}
+// band-limited print: lines keep their ink density as they shrink below a pixel, then fade before moiré
+float lines(vec2 p, float s, float w, vec2 fw){
+  vec2 d = abs(fract(p/s+0.5)-0.5)*s;
+  vec2 a = max(fw*0.8, vec2(w*0.55)), wd = max(vec2(w), a);    // magnified ink stays soft, never razor-cut
+  vec2 l = (1.-smoothstep(wd-a, wd+a, d)) * clamp(vec2(w)/wd, 0., 1.);
+  float g = max(l.x, l.y), mean = 4.*w/s;                        // far away the print averages to its mean tone
+  return mix(g, mean, smoothstep(0.18, 0.42, max(fw.x,fw.y)/s));
+}
+// the lit sheet at floor point P (y = 0); fw = screen footprint of P.xz
+vec3 floorCol(vec3 P, vec2 fw){
+  vec2 p = P.xz;
+  float tooth = 0.985 + 0.02*fbm3(p*7.3);
+  float minor = lines(p+vec2(0.05,0.05), 0.1, 0.0030, fw), major = lines(p, 0.5, 0.0050, fw);
+  float ink = max(minor*0.24, major*0.50);
+  vec3 alb = mix(PAPER*tooth, INK, ink);
+  // light: broad key pool from upper left + sky; the ball's soft shadow holds a focused caustic
+  float key = 0.80 + 0.20*exp(-dot(p-vec2(-2.5,-2.2),p-vec2(-2.5,-2.2))/14.);
+  vec3 d = uC - P; float dist = length(d); vec3 dn = d/dist;
+  float ang = acos(clamp(dot(dn, uL), -1., 1.)), rad = asin(clamp(R/dist, 0., 1.));
+  float lit = smoothstep(rad-0.07, rad+0.07, ang);
+  float rho = ang/max(rad,1e-3);                                   // 0 at shadow centre, 1 at its rim
+  vec3 rr = vec3(0.34, 0.315, 0.29);                               // focus spot radius per channel
+  vec3 caus = 0.80*exp(-(rho*rho)/(rr*rr))*3.4 + 0.10;             // transmitted light, concentrated
+  vec3 sun = mix(caus, vec3(1.), lit);
+  float ao = 1. - 0.75*R*R*max(uC.y,0.)/(dist*dist*dist);          // analytic sphere-on-plane occlusion
+  float far = 1. - 0.5*smoothstep(10., 45., length(p));            // the studio falls off past the sheet
+  vec3 light = far*(0.42*ao + 0.58*key*sun*max(dot(vec3(0,1,0),uL),0.)/0.86);
+  return alb*light;
+}
+vec2 hitFloor(vec3 ro, vec3 rd){ return ro.xz + rd.xz*(-ro.y/min(rd.y,-1e-4)); }
+`;
+
+const FRAG_FLOOR = HEAD + `
+void main(){
+  vec3 rd = camRay(gl_FragCoord.xy);
+  vec2 p = hitFloor(uCam, rd); vec3 P = vec3(p.x, 0., p.y);
+  vec3 col = floorCol(P, fwidth(p));
+  vec2 s = (gl_FragCoord.xy-vec2(960.,540.))/vec2(960.,540.);
+  col *= 1.-0.10*dot(s*vec2(0.9,1.1), s*vec2(0.9,1.1));
+  o = vec4(finish(col, gl_FragCoord.xy), 1.);
+}`;
+
+// Glass: computed without branches so that screen derivatives (fwidth) stay valid on every path.
+const FRAG_GLASS = HEAD + `
+uniform vec3 uN;   // index of refraction for R, G, B (dispersion exaggerated for the fringe)
+vec3 env(vec3 d){  // studio: grey walls low, pale ceiling, a soft window up-left, dark flags at the sides
+  float e = clamp(d.y, -1., 1.);
+  vec3 c = mix(vec3(0.22,0.218,0.212), vec3(0.40,0.395,0.385), smoothstep(0.0, 0.9, e));
+  vec2 w = vec2(atan(d.x, -d.z), asin(e));
+  float win = smoothstep(0.26,0.16,abs(w.x+0.95))*smoothstep(0.22,0.13,abs(w.y-0.78));
+  c += vec3(2.9,2.86,2.78)*win;
+  float strip = smoothstep(0.55,0.25,abs(d.x))*smoothstep(0.30,0.55,d.z)*smoothstep(0.35,0.6,e);   // overhead scrim behind camera
+  c += vec3(0.75,0.74,0.72)*strip;
+  float flag = smoothstep(0.30,0.70,d.x)*smoothstep(-0.1,0.25,e) + smoothstep(-0.55,-0.9,d.x)*smoothstep(0.0,0.2,e)*(1.-smoothstep(0.45,0.6,e));
+  return c*(1.-0.78*clamp(flag,0.,1.));
+}
+void main(){
+  vec3 ro = uCam, rd = camRay(gl_FragCoord.xy);
+  vec3 oc = ro - uC; float b = dot(oc, rd), c = dot(oc, oc) - R*R, h = b*b - c;
+  float closest = sqrt(max(dot(oc,oc) - b*b, 0.));                 // ray-to-centre distance → analytic coverage
+  float pix = length(oc) * 2.*tan(uFov*0.5)/1080.;
+  float cover = clamp((R - closest)/pix + 0.5, 0., 1.);
+  float t = -b - sqrt(max(h, 0.));
+  vec3 P = ro + rd*t, N = normalize(P - uC);
+  // reflection
+  vec3 rf = reflect(rd, N);
+  vec2 fr = hitFloor(P, rf);
+  vec3 refl = mix(env(rf), floorCol(vec3(fr.x,0.,fr.y), fwidth(fr)), step(rf.y, 0.));
+  float cosi = clamp(-dot(rd, N), 0., 1.), F = 0.04 + 0.96*pow(1.-cosi, 5.);
+  // refraction per channel: in, across the ball, out, onto the sheet
+  vec3 trans;
+  for(int k=0;k<3;k++){
+    float n = uN[k];
+    vec3 t1 = refract(rd, N, 1./n);
+    vec3 Q = P + t1*(-2.*dot(t1, P - uC));
+    vec3 N2 = normalize(Q - uC);
+    vec3 t2 = refract(t1, -N2, n);
+    t2 = dot(t2,t2) < 1e-6 ? reflect(t1, -N2) : t2;
+    vec2 fq = hitFloor(Q, t2);
+    vec3 seen = mix(env(t2), floorCol(vec3(fq.x,0.,fq.y), fwidth(fq)), step(t2.y, 0.));
+    trans[k] = seen[k];
+  }
+  vec3 col = trans*(1.-F)*0.96 + refl*F;
+  vec2 s = (gl_FragCoord.xy-vec2(960.,540.))/vec2(960.,540.);
+  col *= 1.-0.10*dot(s*vec2(0.9,1.1), s*vec2(0.9,1.1));
+  o = vec4(finish(col, gl_FragCoord.xy), cover);
+}`;
+
+const G = XM.gpu(), gl = G.gl;
+const floorProg = G.program(FRAG_FLOOR), glassProg = G.program(FRAG_GLASS);
+const N3 = [1.505, 1.522, 1.548];
+const camera = G.camera(CAM, TGT, FOV);
+function frame(t) {
+  const b = ballAt(t), C = [b.x, R, b.z];
+  const U = { uCam: CAM, uTgt: TGT, uFov: FOV, uC: C, uL: LIGHT, uN: N3 };
+  G.run(floorProg, U, null);
+  const corners = [];
+  for (const dx of [-1, 1]) for (const dy of [-1, 1]) for (const dz of [-1, 1]) corners.push([C[0] + dx * R, C[1] + dy * R, C[2] + dz * R]);
+  const box = camera.box(corners, 6);
+  if (box[2] > 0 && box[3] > 0) {
+    gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+    G.run(glassProg, U, null, {}, box);
+    gl.disable(gl.BLEND);
+  }
+  G.finish();
+}
+
+// ---------------- score ----------------
+// Key: A (A · E · B · C♯). The roll is soft noise shaped by speed with a quiet tuned resonance
+// that sinks in pitch as the ball slows, panned with it; the stop rings a tuned glass chime,
+// the settle answers with a faint second partial; a low open fifth holds the room.
+async function renderAudio({ sampleRate }) {
+  const A = XM.audio, M = A.mix(sampleRate, D), sr = sampleRate;
+  const hz = m => 440 * 2 ** ((m - 69) / 12);
+  const brown = A.noiseArr(Math.ceil(10 * sr), 41, 'brown'), pink = A.noiseArr(Math.ceil(10 * sr), 43, 'pink');
+  const v = t => ballAt(t).speed / ballAt(0).v0;                     // 1 → 0 over the roll
+  const pan = t => clamp(ballAt(t).x / 3.4, -0.9, 0.9);
+  const fadeIn = t => smooth(prog(t, 0, 0.45));
+  // the roll: low paper rumble + a brighter grain, both scaled by speed
+  const rumble = [A.filter(brown[0], sr, 'lowpass', 260, 0.7), A.filter(brown[1], sr, 'lowpass', 260, 0.7)];
+  const grain = [A.filter(pink[0], sr, 'bandpass', 1500, 0.9), A.filter(pink[1], sr, 'bandpass', 1500, 0.9)];
+  for (let i = 0; i < M.n; i++) {
+    const t = i / sr, s = v(t), p = pan(t), x = (clamp(p, -1, 1) + 1) * 0.25 * Math.PI, f = fadeIn(t);
+    const a = f * (0.55 * s * Math.sqrt(s) * (rumble[0][i] + rumble[1][i]) * 0.5), g = f * 0.05 * s * s;
+    M.L[i] += (a + g * grain[0][i]) * Math.cos(x) * 1.4; M.R[i] += (a + g * grain[1][i]) * Math.sin(x) * 1.4;
+  }
+  // the rolling tone: two tuned partials, pitch sinking with speed, gently panned with the ball
+  A.tone(M, 0, T_STOP + 0.4, t => hz(69) * (0.82 + 0.18 * v(t)), t => 0.05 * fadeIn(t) * Math.pow(v(t), 0.7), pan);
+  A.tone(M, 0, T_STOP + 0.4, t => hz(76) * (0.82 + 0.18 * v(t)) * 1.002, t => 0.022 * fadeIn(t) * Math.pow(v(t), 0.9), t => pan(t) * 0.8);
+  // room: low open fifth
+  [[45, 0.04, -0.25], [52, 0.03, 0.25]].forEach(([m, a, p]) => A.bowed(M, pink, 0.3, 8.0, hz(m), a, { pan: p, swell: 1.8, release: 1.0, breath: 0.08, vib: 0.3 }));
+  // the stop: tuned glass chime at the rest point, then the settle's faint answer
+  const ps = clamp(P1[0] / 3.4, -0.9, 0.9);
+  A.glass(M, T_STOP, hz(81), 0.15, { decay: 2.8, pan: ps, ratios: [1, 2.0, 3.0, 4.2], weights: [1, 0.32, 0.12, 0.05] });
+  A.glass(M, T_STOP + 0.01, hz(88), 0.06, { decay: 2.0, pan: ps + 0.1 });
+  A.glass(M, T_STOP + 0.52, hz(93), 0.025, { decay: 1.2, pan: ps - 0.1 });
+  A.bowed(M, pink, T_STOP, 8.1, hz(64), 0.022, { pan: -ps * 0.5, swell: 0.9, release: 0.9, breath: 0.12, vib: 4.3 });
+  const buf = await A.render(M, { seed: 31, room: 3.4, wet: 0.45, bright: 0.45, fade: [8.25, 8.8] });
+  return A.master(buf, { lufs: -18, ceiling: -1.7, fadeOut: 0.06 });
+}
+
+XM.film({ duration: D, poster: 7.4, frame, audio: renderAudio });
+</script>
+</body></html>

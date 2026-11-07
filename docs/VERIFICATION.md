@@ -1,34 +1,55 @@
-# Foundation verification
+# Verification: themed gallery
 
-This is evidence for the initial implementation, not a permanent promise of quality.
+Evidence for the themed gallery release (XM-0004 to XM-0012). It records what was checked, not a promise of taste.
 
 ## Reproduce
 
 ```sh
-npm ci --ignore-scripts
+npm ci
 npx playwright install chromium
 npm run check
 npm test
 npm run test:browser
-npm audit --audit-level=high
-node scripts/render.mjs examples/first-light/index.html --out renders/review --video
+npm run catalog -- validate
+npm run build:site
+npm run test:gallery
+docker build -t x-motion .
+docker run -d --rm -p 127.0.0.1:8796:8080 x-motion
+GALLERY_URL=http://127.0.0.1:8796 npm run test:http
+GALLERY_URL=http://127.0.0.1:8796 npm run test:gallery
 ```
 
-Use a new output path for subsequent runs. `npm test` runs lightweight checks and intentionally skips two Chromium integration tests; `npm run test:browser` runs those explicitly.
+Render a film with `node scripts/render.mjs examples/orbit/passage.html --out renders/passage --video` (use a fresh output path).
 
 ## Observed locally
 
-- Static skill/reference/example checks passed.
-- 11 lightweight tests passed; both explicit browser integration tests passed.
-- No high dependency vulnerabilities reported by npm audit.
-- The real sample exported 180 frames at 960×540, 30 fps, six seconds, plus five storyboard frames and H.264 MP4.
-- A backward seek to timestamp zero reproduced the same PNG hash. This checks one specific temporal invariant; it is not a proof of all-frame or cross-platform determinism.
-- Original sound synthesis passed repeatability, sample-peak and non-overwrite checks. Muxed export was probed as six-second H.264 + mono 48 kHz AAC.
-- Actual aperture and final-title frames were inspected. Embedded playback and compare cards passed browser checks at 340×300, 760×460 and 1280×800.
-- Independent review found a real preview/capture race: renderer navigation initially omitted `?render=1`. It is fixed and protected by source-contract and real-browser tests.
+- Static checks: 4 skills, 9 compositions; no em dashes in skills, references or page templates.
+- Unit tests: 29 passed, 4 browser tests skipped by design; `test:browser` ran those 4 and all passed.
+- Catalog: 12 records validate (3 discarded, 9 in review).
+- All nine films were rendered serially at 1920×1080, 30 fps, with every frame captured, a backward-seek frame check and a double audio render. Every film passed both determinism checks with zero clipped samples.
+
+| ID | Film | Length | Integrated | True peak |
+| --- | --- | --- | --- | --- |
+| XM-0004 | Passage | 9 s | -18.0 LUFS | -1.7 dBFS |
+| XM-0005 | Terminator Line | 10 s | -18.0 LUFS | -7.3 dBFS |
+| XM-0006 | Eclipse | 10 s | -18.0 LUFS | -4.6 dBFS |
+| XM-0007 | Dispersion | 9 s | -18.0 LUFS | -5.4 dBFS |
+| XM-0008 | Caustics | 10 s | -18.0 LUFS | -4.5 dBFS |
+| XM-0009 | Lens | 9 s | -18.0 LUFS | -3.7 dBFS |
+| XM-0010 | Bloom | 10 s | -17.9 LUFS | -6.4 dBFS |
+| XM-0011 | Stroke | 8 s | -17.8 LUFS | -6.5 dBFS |
+| XM-0012 | Mist | 12 s | -18.2 LUFS | -3.2 dBFS |
+
+- Gallery end-to-end (local server and the production nginx image): 3 theme chapters, 9 film pages (metadata, muted playback, no autoplay, prompt copy, ID copy, skill links, arrow keys), 4 skill pages (raw Markdown served as `text/markdown`, Copy Markdown equals the file byte for byte, download link), 404 page, relative redirects, no overflow or controls under 44 px at 360, 390, 768 and 1280 px, reduced motion keeps previews still.
+- HTTP suite against the image: health, security and cache headers, catalog, video, poster and preview digests, byte ranges, page content types.
+
+## Review notes
+
+- Poster frames and selected stills of all nine films were inspected as images. During review the Terminator Line ground read olive; the ocean and land shading were cooled and the film re-rendered. A warm cast on sunlit land remains by design at the dawn line.
+- The theme authors checked their work with storyboard stills only. Two Orbit films, Passage and Eclipse, render slowly (about 1.5 to 1.8 s per frame) on this machine.
 
 ## Not established
 
-No human aesthetic approval, audience response, phone performance benchmark or listening review has been established. Browser playback checks do not mean a human watched the film or approved its pacing. The sample is an initial study, not a claim of world-class finish.
+Nobody has watched the films end to end or listened to the scores for this record. Loudness numbers are measurements, not a listening review. Browser checks prove playback works, not that pacing or sound are good. No phone performance benchmark was run.
 
-Opus 5.5 was attempted but hit its session limit before authoring the scene; the sample was authored by the Astra fallback. Do not attribute it to Opus. The preferred-model recommendation is a future authoring choice, not an evaluation result.
+All nine films and three theme skills were authored by Claude Opus 5.5 sessions; the lead session (also Opus 5.5) made the Terminator colour fix.

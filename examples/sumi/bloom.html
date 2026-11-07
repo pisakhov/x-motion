@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bloom · X Motion Sumi</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;background:#000;overflow:hidden} canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="film" width="1920" height="1080"></canvas>
+<script src="kit.js"></script>
+<script>
+'use strict';
+// Bloom: one ink drop in still water. It plunges, rolls into a vortex ring, splits into five
+// hanging lobes that settle as a flower, then diffuses into grey.
+// Cue map (seconds): 0.0 still water tone | 1.00 drop meets surface: plink + soft plop | 1.0-2.2 muffled
+// bubbles as the ink plunges | 1.75 flute enters, scooped up to D5 as the ring opens | 4.9 flute falls to A4
+// as the lobes settle into the flower | 8.6 breath tail | silence from 9.86.
+const D = 10, TH = 1.0;
+window.motion = { width: 1920, height: 1080, duration: D, fps: 30, poster: 6.8 };
+
+const gl = XM.initGL(document.getElementById('film'));
+const prog = XM.program(gl, `
+uniform vec2 uCam;      // camera centre in H units
+uniform float uZoom;
+const float YS = 0.17;             // water surface
+const float X0 = 0.76;             // entry point
+const float TH = ${TH.toFixed(3)};
+const float E = 0.62;              // sin of camera elevation: the ring is seen from above
+
+float gseg(vec2 p, vec2 a, vec2 b, float wa, float wb){
+  float h; float d = segD(p, a, b, h); float w = mix(wa, wb, h);
+  return exp(-(d * d) / (w * w));
+}
+float vseg(vec2 p, vec2 a, vec2 b, float wa, float wb){
+  float h; float d = segD(p, a, b, h); float w = mix(wa, wb, h) * 3.2;
+  return exp(-(d * d) / (w * w));
+}
+
+// Geometry of the plume at time tau (closed form).
+struct Plume { float yr; float R; float xr; float brk; float pl; float dis; };
+Plume plume(float tau){
+  Plume P;
+  P.yr = YS + 0.035 + 0.40 * (1.0 - exp(-tau / 1.45));
+  P.R = 0.010 + 0.105 * (1.0 - exp(-tau / 1.9));
+  P.xr = X0 + 0.018 * (1.0 - exp(-tau / 4.0)) + 0.0035 * max(tau - 3.0, 0.0);
+  P.brk = smoothstep(1.4, 3.6, tau);
+  P.pl = 1.0 - exp(-max(tau - 1.5, 0.0) / 1.6);
+  P.dis = smoothstep(7.1, 9.8, uT);
+  return P;
+}
+// Lobes leave the ring in 3D (outward and down) and are projected for a camera looking down by ~30 degrees.
+void lobe(int i, Plume P, out vec2 B, out vec2 dir, out float len, out float back){
+  float fi = float(i);
+  float th = 0.35 + fi * 1.2566 + 0.16 * sin(fi * 2.7) + 0.045 * max(uT - 2.5, 0.0);   // the corolla turns slowly
+  float c = cos(th), s = sin(th);
+  back = 0.55 + 0.45 * smoothstep(0.5, -0.5, s);            // s > 0 is the far side
+  float R = P.R * 0.9;
+  float reach = (0.150 + 0.025 * sin(fi * 1.9 + 0.4)) * P.pl, fall = (0.055 + 0.02 * cos(fi * 2.3)) * P.pl;
+  vec3 b3 = vec3(R * c, 0.0, R * s), t3 = vec3((R + reach) * c, fall, (R + reach) * s);
+  B = vec2(P.xr + b3.x, P.yr + b3.y * 0.78 - b3.z * E);
+  vec2 T = vec2(P.xr + t3.x, P.yr + t3.y * 0.78 - t3.z * E);
+  vec2 v = T - B; len = length(v) + 1e-4; dir = v / len;
+}
+vec2 swirl(vec2 q, vec2 c, float ang, float sig){
+  vec2 d = q - c; float a = ang * exp(-dot(d, d) / (sig * sig));
+  float cs = cos(a), sn = sin(a);
+  return c + mat2(cs, sn, -sn, cs) * d;
+}
+
+// returns (core density, veil density)
+vec2 field(vec2 q, float tau, Plume P){
+  vec2 acc = vec2(0.0);
+  if (tau < 0.0) return acc;
+  float grow = 1.0 + 0.35 * smoothstep(3.5, 7.0, uT) + 2.3 * P.dis;
+  float yr = P.yr, R = P.R, xr = P.xr;
+  // wake of the falling drop: widens, softens, curls and fades within about a second, top first
+  {
+    float cw = 1.0 - exp(-tau / 0.4);
+    vec2 qw = q + vec2(0.022 * cw * sin((q.y - YS) * 22.0 + 0.8) + 0.008 * cw * sin((q.y - YS) * 57.0 + 2.1), 0.0);
+    float h; float dw = segD(qw, vec2(X0, YS), vec2(xr, yr - 0.012), h);
+    float ww = (0.003 + 0.034 * (1.0 - exp(-tau / 0.35))) * (0.55 + 0.45 * h) * grow;
+    float wa = 0.55 * exp(-tau / (0.22 + 0.5 * h)) * (0.004 / (0.001 + ww)) * 0.32;
+    acc.x += wa * exp(-dw * dw / (ww * ww));
+    acc.y += wa * 0.6 * exp(-dw * dw / (6.0 * ww * ww));
+  }
+  // head: a dense bead that opens into a ring with a dome of ink above it
+  float bead = exp(-tau / 0.32);
+  vec2 dr = q - vec2(xr, yr);
+  float ell = length(vec2(dr.x, dr.y / E));
+  float rw = (0.007 + 0.007 * smoothstep(0.0, 3.0, tau)) * grow;
+  float ringA = mix(1.2, 0.32, P.brk) * (1.0 - bead);
+  acc.x += ringA * exp(-pow((ell - R) / rw, 2.0)) + bead * 1.6 * exp(-dot(dr, dr) / pow(0.011 + 0.012 * tau, 2.0));
+  vec2 dm = vec2(dr.x / (R * 1.05 + 0.006), (dr.y + E * R * 0.5) / (R * 0.75 + 0.006));
+  float dome = smoothstep(1.05, 0.55, length(dm)) * step(dr.y, E * R * 0.6);
+  acc.y += 0.5 * (1.0 - P.brk) * dome * (1.0 - bead) + 0.22 * P.brk * smoothstep(1.0, 0.2, ell / (R + 0.01)) + 0.35 * exp(-pow((ell - R * 0.9) / (rw * 3.5), 2.0)) * (1.0 - bead);
+  // five translucent lobes hang from the ring: darker where their sheets are seen edge-on
+  if (P.brk > 0.0) {
+    for (int i = 0; i < 5; i++) {
+      vec2 B, dir; float len, back;
+      lobe(i, P, B, dir, len, back);
+      vec2 perp = vec2(-dir.y, dir.x);
+      vec2 d = q - (B + dir * len * 0.52);
+      float al = dot(d, dir) / (len * 0.56 + 0.004);
+      float bw = (0.052 * P.pl + 0.004) * (0.34 + 0.66 * smoothstep(-1.1, 0.2, al)) * (1.0 - 0.3 * smoothstep(0.55, 1.0, al)) * grow;
+      float e = length(vec2(al, dot(d, perp) / bw));
+      float inside = smoothstep(1.02, 0.80, e);
+      float rim = exp(-pow((e - 0.84) / 0.3, 2.0));
+      float thread = gseg(q, B, B + dir * len * 0.95, 0.006 * grow, 0.012 * grow);
+      vec2 tc = B + dir * len * 1.02;
+      vec2 dt = q - tc;
+      float tip = exp(-pow((length(vec2(dot(dt, perp), dot(dt, dir) / 0.6)) - 0.013 * P.pl) / (0.010 * grow), 2.0));
+      float a = P.brk * back;
+      acc.x += a * (0.12 * thread + 0.24 * tip + 0.16 * rim * smoothstep(-0.9, 0.2, al));
+      acc.y += a * (0.55 * inside * (0.5 + 0.5 * smoothstep(-0.8, 0.6, al)) + 0.15 * rim);
+    }
+  }
+  acc.x *= 1.0 - 0.88 * P.dis;
+  acc.y *= 1.0 - 0.72 * P.dis;
+  return acc;
+}
+
+void main(){
+  vec2 px = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec2 sc = vec2(uRes.x / uRes.y * 0.5, 0.5);
+  vec2 W = (px / uRes.y - sc) / uZoom + uCam;              // world, H units, y down
+  float tau = uT - TH;
+
+  // backdrop: warm rice-paper light seen through water, fibres defocused
+  vec4 pp = paperAt(px, 2.6);
+  vec2 lq = (px / uRes.y - vec2(0.80, 0.36)) * vec2(0.55, 0.8);
+  float light = clamp(1.08 - dot(lq, lq) * 1.5, 0.0, 1.0);
+  vec3 col = washi(pp, light);
+
+  // surface with ripple after impact
+  float dx = abs(W.x - X0);
+  float rip = 0.0;
+  if (tau > 0.0) {
+    float front = 0.34 * tau;
+    rip = 0.0055 * exp(-tau * 1.3) * sin(70.0 * dx - 30.0 * tau) * smoothstep(front, front - 0.06, dx) * smoothstep(0.0, 0.02, dx + 0.004);
+  }
+  float ys = YS + rip;
+  float sd = (W.y - ys) * uRes.y * uZoom;                    // pixels below surface
+  float under = smoothstep(-1.0, 1.0, sd);
+  vec3 water = col * mix(vec3(1.0), vec3(0.955, 0.965, 0.96), smoothstep(0.0, 0.9, W.y - YS));
+  vec3 air = col * 1.035;
+  col = mix(air, water, under);
+  col *= 1.0 - 0.13 * exp(-pow((sd - 2.0) / 2.2, 2.0));    // meniscus line
+  col *= 1.0 + 0.06 * exp(-pow((sd - 9.0) / 5.0, 2.0));     // reflected light band
+
+  // falling drop (in air)
+  float dens = 0.0, core = 0.0;   // core: dense sumi (warm black); dens: washes and veils (neutral grey)
+  if (uT > 0.5 && tau < 0.02) {
+    float u = clamp((uT - 0.52) / 0.48, 0.0, 1.0);
+    float yd = -0.09 + (YS + 0.09) * pow(u, 1.7);
+    vec2 dd = W - vec2(X0, yd - 0.004);
+    float st = 1.0 + 1.1 * u;
+    core += 1.8 * smoothstep(1.0, 0.75, length(vec2(dd.x, dd.y / st)) / 0.0085);
+  }
+
+  // ink: inverse advection through a curl field whose strength grows with time since impact
+  if (tau > 0.0) {
+    Plume P = plume(tau);
+    vec2 q = W;
+    // vortex roll-up: the ring cores and lobe tips curl the surrounding ink
+    float spin = 2.4 * (1.0 - exp(-tau / 1.6)) * (1.0 - 0.55 * P.brk);
+    q = swirl(q, vec2(P.xr - P.R, P.yr), spin, P.R * 0.55 + 0.01);
+    q = swirl(q, vec2(P.xr + P.R, P.yr), -spin, P.R * 0.55 + 0.01);
+    if (P.brk > 0.0) {
+      for (int i = 0; i < 5; i++) {
+        vec2 B, dir; float len, back;
+        lobe(i, P, B, dir, len, back);
+        float sgn = dir.x < 0.0 ? 1.0 : -1.0;
+        q = swirl(q, B + dir * len * 1.0, sgn * 1.3 * P.brk * P.pl, 0.03 * P.pl + 0.004);
+      }
+    }
+    // slow, large-scale drift: silky rather than boiling
+    float A = (0.004 + 0.020 * smoothstep(0.3, 6.0, tau) + 0.018 * P.dis) * smoothstep(0.0, 0.25, W.y - YS + 0.05);
+    vec2 drift = vec2(0.0, -0.004 * uT);
+    q += A * 1.00 * nz(q * 1.3 + vec2(0.13, 0.71) + drift).rg;
+    q += A * 0.45 * nz(q * 2.9 + vec2(0.57, 0.21) + drift * 1.5).rg;
+    q += A * 0.10 * nz(q * 7.5 + vec2(0.31, 0.93)).rg;
+    vec2 f = field(q, tau, P);
+    float billow = 0.7 + 0.6 * fbm3(q * 2.4 + vec2(0.0, -0.006 * uT));
+    float sheetN = n1(q * vec2(3.0, 1.6) + 0.4);
+    float sheet = 1.0 - smoothstep(0.0, 0.11, abs(sheetN - 0.5));
+    core += f.x * (0.8 + 0.4 * billow) * mix(1.3, 1.0, P.dis);
+    dens += f.y * billow * 0.6 + sheet * smoothstep(0.1, 0.45, f.y) * 0.05 * (1.0 - P.dis);
+    // grey diffusion at the end: the whole region clouds over softly
+    vec2 hc = (W - vec2(X0 + 0.02, 0.60)) * vec2(0.8, 1.0);
+    dens += P.dis * (0.07 + 0.11 * fbm3(W * 0.9 + vec2(0.0, -0.008 * uT))) * exp(-dot(hc, hc) / 0.09) * smoothstep(0.0, 0.1, W.y - YS);
+  }
+  col *= exp(-core * vec3(3.2, 3.6, 4.2) - dens * vec3(3.45, 3.55, 3.65));
+  // gentle vignette, keep edges quiet
+  vec2 vq = (px / uRes - 0.5) * vec2(1.0, 0.9);
+  col *= 1.0 - 0.18 * smoothstep(0.18, 0.62, dot(vq, vq) * 2.0);
+  outColor = vec4(dither(srgb(col)), 1.0);
+}`);
+
+function frame(t) {
+  const follow = XM.smooth(1.0, 7.5, t);
+  prog.draw({ uT: t, uCam: [0.889 - 0.03 * follow, 0.5 + 0.055 * follow], uZoom: 1 + 0.075 * follow });
+}
+XM.run({ duration: D, draw: frame });
+
+window.renderAudio = async function ({ sampleRate }) {
+  const ctx = new OfflineAudioContext(2, Math.ceil(D * sampleRate), sampleRate), A = XM.audio;
+  const m = A.master(ctx, { seed: 23, reverbSeconds: 5, decay: 1.5, gain: 0.62, fade: [8.9, 9.86] });
+  // still water: a faint low hush, slightly wider after the impact
+  A.noiseLayer(ctx, m, { t1: D, seed: 2, color: 'brown', type: 'lowpass', freq: 300, q: 0.4, wet: 0.2,
+    pts: [[0.6, 0.05], [8.8, 0.05], [9.7, 0]] });
+  // drop: rising-pitch plink (bubble resonance) that meets the impact frame, with a soft plop under it
+  const plink = ctx.createOscillator();
+  plink.frequency.setValueAtTime(1150, TH); plink.frequency.exponentialRampToValueAtTime(2350, TH + 0.045);
+  const pg = ctx.createGain(); A.env(pg.gain, [[TH, 0, 'set'], [TH + 0.002, 0.26], [TH + 0.11, 0.0001, 'exp']]);
+  plink.connect(pg); A.route(ctx, m, pg, { pan: -0.12, dry: 0.8, wet: 0.55 }); plink.start(TH); plink.stop(TH + 0.15);
+  const plop = ctx.createOscillator();
+  plop.frequency.setValueAtTime(240, TH); plop.frequency.exponentialRampToValueAtTime(95, TH + 0.09);
+  const og = ctx.createGain(); A.env(og.gain, [[TH, 0, 'set'], [TH + 0.004, 0.32], [TH + 0.16, 0.0001, 'exp']]);
+  plop.connect(og); A.route(ctx, m, og, { pan: -0.12, wet: 0.35 }); plop.start(TH); plop.stop(TH + 0.2);
+  A.noiseLayer(ctx, m, { t0: TH - 0.01, t1: TH + 0.3, seed: 9, color: 'white', freq: 3200, q: 1.2, wet: 0.4,
+    pts: [[TH, 0, 'set'], [TH + 0.004, 0.10], [TH + 0.07, 0.0]] });
+  // muffled bubbles as the ink plunges
+  const r = XM.mulberry32(404);
+  for (let k = 0; k < 6; k++) {
+    const t = TH + 0.18 + k * 0.17 + r() * 0.1, f = 520 + r() * 500;
+    const o = ctx.createOscillator(); o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 1.7, t + 0.04);
+    const g = ctx.createGain(); A.env(g.gain, [[t, 0, 'set'], [t + 0.003, 0.05 * (1 - k / 7)], [t + 0.07, 0.0001, 'exp']]);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+    o.connect(g); g.connect(lp); A.route(ctx, m, lp, { pan: -0.12 + (r() - 0.5) * 0.3, wet: 0.6 }); o.start(t); o.stop(t + 0.1);
+  }
+  // breathy flute: enters as the ring opens, settles a fourth lower with the flower
+  A.flute(ctx, m, { t0: 1.75, t1: 5.15, f: 587.33, scoop: 0.94, scoopTime: 0.5, level: 0.085, pan: 0.15, wet: 0.75, seed: 31 });
+  A.flute(ctx, m, { t0: 4.85, t1: 8.75, f: 440.0, scoop: 0.975, scoopTime: 0.3, level: 0.08, pan: 0.05, wet: 0.8, fallTo: 415.3, seed: 37 });
+  // a very low water tone under the settle
+  const lo = ctx.createOscillator(); lo.frequency.value = 73.42;
+  const lg = ctx.createGain(); A.env(lg.gain, [[2.0, 0, 'set'], [4.5, 0.05], [7.5, 0.04], [9.4, 0]]);
+  lo.connect(lg); A.route(ctx, m, lg, { wet: 0.3 }); lo.start(2.0); lo.stop(9.5);
+  // breath tail
+  A.noiseLayer(ctx, m, { t0: 8.3, t1: 9.6, seed: 44, color: 'pink', freq: 1100, q: 0.7, wet: 0.5,
+    pts: [[8.4, 0, 'set'], [8.75, 0.035], [9.5, 0]] });
+  return await ctx.startRendering();
+};
+</script>
+</body>
+</html>

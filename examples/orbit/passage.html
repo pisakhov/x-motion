@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Passage · X Motion Orbit</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body>
+<script src="kit.js"></script>
+<script>
+'use strict';
+// Passage. A brushed-titanium X seals the frame, unlatches, parts, and we fall through
+// into deep space; a planet rises and the sun crests its limb. Original, procedural.
+const { GLSL, ATMO, V, clamp, lin, smooth, smoother, mix } = OrbitKit;
+const D = 9;
+
+// ------------------------------------------------------------------ scene pass (half res, HDR)
+const SCENE = GLSL + ATMO + `
+uniform vec3 uCamPos,uCamR,uCamU,uCamF;
+uniform float uFocal,uPlanet;uniform vec3 uMoon;
+vec3 surface(vec3 n,vec3 rd,out float city){
+  vec3 q=n;
+  float w=fbm3(q*1.6+vec3(4.1,1.3,7.7),3);
+  float h=fbm3(q*2.2+(w-.5)*1.5,5);
+  float land=smoothstep(.548,.566,h);
+  float coast=exp(-abs(h-.557)*34.);
+  float det=vnoise3(q*12.);
+  vec3 alb=mix(vec3(.005,.022,.074),mix(vec3(.026,.032,.034),vec3(.058,.052,.044),det),land);
+  float cl=fbm3(q*3.0+vec3(9.,2.,5.)+(w-.5)*.8,4);
+  float cloud=smoothstep(.55,.76,cl)*.85;
+  float mu=dot(n,uSunDir);
+  vec3 l=lightDepth(n*1.0004,uSunDir);vec3 T=extinct(l.xy)*l.z;
+  vec3 direct=uSunI*T*max(mu,0.)/PI;
+  vec3 sky=uSunI*.010*smoothstep(-.10,.2,mu)*vec3(.30,.55,1.);
+  vec3 amb=vec3(.0006,.0016,.0046);
+  // moonlight: a weak cool fill so the night ocean reads navy and cloud tops silver-blue
+  vec3 moon=vec3(.11,.22,.46)*(.25+.75*max(dot(n,uMoon),0.))*smoothstep(.05,-.1,mu);
+  vec3 c=alb*(direct+sky+moon)+amb*(land>.5?.5:1.);
+  vec3 hv=normalize(uSunDir-rd);float nh=max(dot(n,hv),0.);const float a2=.010;
+  float Dg=a2/(PI*pow(nh*nh*(a2-1.)+1.,2.));
+  float F=.02+.98*pow(1.-max(dot(-rd,hv),0.),5.);
+  c+=(1.-land)*(1.-cloud)*uSunI*T*Dg*F*max(mu,0.)*.25/max(dot(n,-rd),.2);
+  vec3 lc=lightDepth(n*1.003,uSunDir);vec3 Tc=extinct(lc.xy)*lc.z;
+  vec3 cc=vec3(.55)*(uSunI*Tc*max(mu+.03,0.)/PI+sky)+vec3(.62,.70,.80)*moon+amb*1.4;
+  c=mix(c,cc,cloud);
+  float night=smoothstep(.02,-.10,mu);
+  float cl2=smoothstep(.45,.70,fbm3(q*13.+3.,3));
+  city=land*night*(1.-cloud*.9)*cl2*(.30+1.8*coast);
+  return c;
+}
+void main(){
+  if(uPlanet<.001){outColor=vec4(0.);return;}
+  vec2 p=pix();vec3 rd=normalize(p.x*uCamR+p.y*uCamU+uFocal*uCamF);vec3 ro=uCamPos;
+  vec3 col=vec3(0.);float city=0.,tmax=1e4;
+  vec2 hp=sphereHit(ro,rd,1.);
+  if(hp.x>0.){tmax=hp.x;col=surface(normalize(ro+rd*hp.x),rd,city);}
+  vec3 tr;vec3 ins=atmo(ro,rd,tmax,tr);
+  col=col*tr+ins;
+  // cyan fresnel limb: thin cool rim that reads on the night side too
+  if(hp.x>0.){vec3 n=normalize(ro+rd*hp.x);float fr=pow(1.-max(dot(n,-rd),0.),5.);col+=vec3(.03,.16,.42)*fr*.11;}
+  // faint oxygen airglow line along the night limb
+  float b=-dot(ro,rd);vec3 cp=ro+rd*max(b,0.);float hmin=length(cp)-1.;
+  float ng=smoothstep(.1,-.2,dot(normalize(cp),uSunDir));
+  col+=vec3(.20,1.,.42)*.010*exp(-pow((hmin-.012)/.0016,2.))*ng*(hp.x>0.?.35:1.);
+  if(hp.x<0.)col+=vec3(.04,.26,.80)*.010*exp(-max(hmin,0.)/.0045)*(.35+.65*ng);
+  outColor=vec4(col*uPlanet,city*uPlanet);
+}`;
+
+// ------------------------------------------------------------------ composite (full res)
+const COMPOSITE = GLSL + `
+uniform sampler2D uScene;
+uniform vec3 uCamPos,uCamR,uCamU,uCamF,uSunDir,uSunTint;
+uniform float uFocal,uPlanet,uSunR,uFlare,uExpo,uFade;
+uniform vec2 uSunScr;
+uniform float uDoor,uOpen,uZoom,uHub,uLight;uniform vec3 uKey;
+uniform float uTravel,uStreak,uWarp,uStarsOn;
+const float HR=.0045;const vec3 BR=vec3(11.8,27.4,67.0);
+const vec3 TI=vec3(.30,.31,.33),NI=vec3(.78,.79,.80),CH=vec3(1.,.82,.58);
+
+// ---- titanium vault door
+mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,s,-s,c);}
+vec3 metal(vec3 N,vec3 T,vec2 P,float grain,float ao){
+  vec3 pos=vec3(P,0.);
+  vec3 L=normalize(uKey-pos),Vw=normalize(vec3(0.,0.,2.4)-pos),H=normalize(L+Vw);
+  vec3 L2=normalize(vec3(.9,-.7,.5)-pos),H2=normalize(L2+Vw);
+  float dif=max(dot(N,L),0.);
+  float th=dot(T,H),an=pow(sqrt(max(1.-th*th,0.)),110.)*dif;
+  float th2=dot(T,H2),an2=pow(sqrt(max(1.-th2*th2,0.)),60.)*max(dot(N,L2),0.);
+  float iso=pow(max(dot(N,H),0.),70.);
+  vec3 R=reflect(-Vw,N);
+  float env=smoothstep(.2,.9,R.y*.5+.5)*.06+smoothstep(.75,1.,R.x)*.05;
+  float sheen=pow(sqrt(max(1.-th*th,0.)),14.)*dif;
+  vec3 c=TI*grain*(.02+.16*dif)+sheen*TI*.55+an*CH*(.5+.9*grain)*1.5+an2*NI*.12+iso*vec3(1.,.93,.8)*.7+env*NI*.6;
+  return c*ao;
+}
+// returns colour; cover = 1 where a leaf covers the pixel
+vec3 door(vec2 p,out float cover){
+  cover=0.;
+  vec2 P=p/uZoom;float px=1./(uRes.y*uZoom);
+  vec2 dir;mat2 toC;
+  if(abs(P.x)<P.y){dir=vec2(0,1);toC=mat2(1,0,0,1);}
+  else if(abs(P.x)< -P.y){dir=vec2(0,-1);toC=mat2(-1,0,0,-1);}
+  else if(P.x>0.){dir=vec2(1,0);toC=mat2(0,1,-1,0);}
+  else{dir=vec2(-1,0);toC=mat2(0,-1,1,0);}
+  vec2 q=P-dir*uOpen;          // leaf-local (screen orientation)
+  vec2 c=toC*q;                // canonical: leaf points up
+  const float S2=.70710678;
+  float e1=(c.y-c.x)*S2,e2=(c.y+c.x)*S2;
+  float e=min(e1,e2);
+  vec2 ge=e1<e2?vec2(-S2,S2):vec2(S2,S2);   // gradient of e in canonical space
+  const float GAP=.0013;
+  float r=length(q),ang=atan(q.y,q.x);
+  const float RH=.15;
+  bool sealedHub=r<RH&&uOpen<=0.;
+  float inside=sealedHub?1.:smoothstep(GAP-px,GAP+px,e);
+  if(inside<=0.)return vec3(0.);
+  cover=inside;
+  mat2 fromC=transpose(toC);
+  vec2 gs=fromC*ge;            // gradient direction in screen space
+  vec3 N=vec3(0,0,1);vec3 T=vec3(-q.y,q.x,0.)/max(r,1e-4);
+  float ao=1.;float grain;
+  if(r<RH){
+    // hub: turned boss, cut along its own diagonals (rotated by uHub until aligned)
+    vec2 hq=rot(-uHub)*q;
+    float eh=min(abs(hq.y-hq.x),abs(hq.y+hq.x))*S2;
+    float slope=0.;
+    slope+=smoothstep(RH-.014,RH-.011,r)*(1.-smoothstep(RH-.003,RH,r))*-.9;   // outer chamfer
+    slope+=(smoothstep(.100,.102,r)-smoothstep(.104,.106,r))*.8;           // groove wall
+    slope-=(smoothstep(.106,.108,r)-smoothstep(.110,.112,r))*.8;
+    slope+=(1.-smoothstep(.0,.055,r))*-.25*r/.055;                          // domed cap
+    N=normalize(vec3(-slope*q/max(r,1e-4),1.));
+    float seam=smoothstep(GAP-px,GAP+px*1.5,eh);
+    float bev=smoothstep(GAP,GAP+.004,eh);
+    vec2 gh=(abs(hq.y-hq.x)<abs(hq.y+hq.x))?vec2(-S2,S2)*sign(hq.y-hq.x):vec2(S2,S2)*sign(hq.y+hq.x);
+    gh=rot(uHub)*gh;
+    N=normalize(N+vec3(-gh*(1.-bev)*.9,0.));
+    grain=.9+.1*vnoise2(vec2(r*700.,ang*3.))+.06*vnoise2(vec2(r*260.,ang*1.5));
+    ao=mix(.05,1.,seam)*(.75+.25*smoothstep(RH-.02,RH-.012,r));
+    vec3 col=metal(N,T,P,grain,ao);
+    col+=CH*.6*pow(max(1.-abs(r-.06)/.002,0.),2.)*smoothstep(.0,.3,dot(normalize(uKey.xy-P),q/r)); // fine lathe ring
+    return col*uLight;
+  }
+  // arm rim (half of an X arm belongs to each leaf)
+  const float C1=.010,W=.074,C2=.007;
+  float sl=0.;
+  sl+=smoothstep(GAP,GAP+.002,e)*(1.-smoothstep(GAP+C1-.002,GAP+C1,e))*1.;
+  sl-=smoothstep(W,W+.0015,e)*(1.-smoothstep(W+C2-.0015,W+C2,e))*1.;
+  N=normalize(vec3(-sl*gs,1.));
+  float onRim=1.-smoothstep(W+C2*.5-px,W+C2*.5+px,e);
+  vec2 sd=vec2(-gs.y,gs.x);
+  T=mix(T,vec3(sd,0.),onRim);
+  float along=dot(q,sd),across=dot(q,gs);
+  float gRim=.9+.12*vnoise2(vec2(across*900.,along*4.))+.05*vnoise2(vec2(across*300.,along*2.));
+  float gPlate=.9+.1*vnoise2(vec2(r*650.,ang*3.))+.06*vnoise2(vec2(r*240.,ang*1.2));
+  grain=mix(gPlate,gRim,onRim);
+  // engraved rings on the plate
+  float gr=0.;
+  for(int i=0;i<2;i++){float R0=i==0?.33:.52;float d=r-R0;gr+=exp(-d*d/(2.*.0012*.0012));
+    float sg=(smoothstep(-.003,-.001,d)-smoothstep(.001,.003,d));
+    N=normalize(N+vec3(q/r*sign(d)*sg*.6*(1.-onRim),0.));}
+  ao=(.25+.75*smoothstep(GAP,GAP+.006,e))*(1.-.45*exp(-pow(max(e-W-C2,0.)/.012,1.)*1.)*(1.-onRim))*(1.-.5*gr*(1.-onRim));
+  vec3 col=metal(N,T,P,grain,ao);
+  return col*uLight;
+}
+
+// ---- warp streaks (screen space, log-polar)
+vec3 warp(vec2 p){
+  float r=length(p);if(r<.004)return vec3(0.);
+  float a=atan(p.y,p.x),lr=log(r);vec3 acc=vec3(0.);
+  for(int i=0;i<3;i++){
+    float fi=float(i),K=floor(26.+fi*14.),sp=.45+fi*.32,Ku=1.2;
+    float ac=(a/(2.*PI)+.5)*K,ca=floor(ac);
+    float u=(lr-uTravel*sp)*Ku;
+    float len=min(uStreak*sp*Ku,2.6);
+    for(int j=0;j<3;j++){
+      float cu=floor(u)+float(j);
+      vec3 h=hash33(vec3(ca,cu,fi*17.+3.));
+      float rc=exp((cu+.5)/Ku+uTravel*sp);
+      if(h.z>.20*clamp(rc*rc*3.,0.,1.))continue;
+      float su=cu+.1+.8*h.y;
+      float across=(ac-ca-.2-.6*h.x)/K*2.*PI*r*uRes.y;
+      float du=u<su-len?(su-len-u):(u>su?u-su:0.);
+      float along=du/Ku*r*uRes.y;
+      float lenPx=len/Ku*r*uRes.y;
+      float head=len>0.?clamp(1.-(su-u)/max(len,1e-3),0.,1.):1.;
+      float depth=.30+.35*fi;float b=depth*(.16+1.1*pow(hash13(vec3(ca,cu,fi)),5.))*(.25+.75*head*head)/(1.+lenPx*.010);
+      vec3 sc=mix(vec3(.70,.82,1.),vec3(1.,.90,.76),h.x);
+      float wd=1.1+.9*fi;acc+=sc*b*exp(-across*across/(wd*wd)-along*along/(wd*wd*1.6));
+    }
+  }
+  return acc;
+}
+// ---- world-space stars, band-limited
+vec3 stars(vec3 rd,float fwr){
+  vec3 acc=vec3(0.);
+  for(int l=0;l<2;l++){
+    float F=l==0?190.:430.;
+    vec3 g=rd*F,c=floor(g),f=g-c;
+    vec3 h=hash33(c+float(l)*31.7);
+    if(h.x>(l==0?.07:.022))continue;
+    vec3 d=f-(.2+.6*hash33(c+7.3));
+    float sig=max(fwr*F*.9,.04);
+    float b=(l==0?.8:.5)*(.10+pow(h.y,6.)*4.)*(.02*.02)/(sig*sig+.0004)*6.;
+    acc+=mix(vec3(.72,.82,1.),vec3(1.,.88,.72),h.z)*b*exp(-dot(d,d)/(2.*sig*sig));
+  }
+  return acc;
+}
+vec3 extinctRay(float r0){return exp(-BR*2.*HR*exp(-(r0-1.)/HR)*sqrt(PI*r0/(2.*HR)));}
+
+void main(){
+  vec2 p=pix();vec2 uv=gl_FragCoord.xy/uRes;
+  vec3 col=vec3(0.);
+  float cover=0.;vec3 dc=vec3(0.);
+  if(uDoor>0.)dc=door(p,cover);
+  if(cover<1.){
+    vec3 rd=normalize(p.x*uCamR+p.y*uCamU+uFocal*uCamF);vec3 ro=uCamPos;
+    float fwr=length(fwidth(rd));
+    vec4 sc=texture(uScene,uv);
+    vec3 sp=sc.rgb;
+    sp+=(textureLod(uScene,uv,3.).rgb*.55+textureLod(uScene,uv,5.).rgb*.35+textureLod(uScene,uv,6.5).rgb*.10)*.08;
+    vec2 hp=sphereHit(ro,rd,1.);
+    if(hp.x>0.){
+      vec3 n=normalize(ro+rd*hp.x);
+      float m=sc.a;
+      if(m>.002){
+        float cs=0.;
+        for(int k=0;k<2;k++){
+          float F=k==0?150.:380.;vec3 g=n*F,c=floor(g),f=g-c;
+          vec3 h=hash33(c+float(k)*13.1);
+          if(h.x<(k==0?.55:.35)){
+            vec3 d=f-(.25+.5*hash33(c+5.1));
+            float sig=max(fwr*F*.42/max(dot(n,-rd),.08)*.5+fwr*F*.35,.03);
+            float tw=.82+.18*sin(uTime*(1.7+2.3*h.y)+h.z*6.283);
+            cs+=(k==0?1.:.55)*(.3+pow(h.z,3.)*2.)*tw*(.03*.03)/(sig*sig+.0002)*exp(-dot(d,d)/(2.*sig*sig));
+          }
+        }
+        sp+=vec3(1.,.60,.26)*m*(cs*6.4+.012);
+      }
+    }else{
+      float b=-dot(ro,rd);float r0=length(ro+rd*max(b,0.));
+      vec3 T=extinctRay(r0)*(b>0.?1.:1.);
+      vec3 st=stars(rd,fwr)*uStarsOn*(1.-.65*clamp(uFlare,0.,1.));
+      float ca=dot(rd,uSunDir);
+      if(ca>.99){
+        float x=length(cross(rd,uSunDir))/uSunR;
+        float mu=sqrt(max(1.-x*x,0.));
+        float edge=1.-smoothstep(1.-fwr/uSunR,1.+fwr/uSunR,x);
+        sp+=vec3(1.,.93,.82)*90.*(1.-.62*(1.-mu))*edge*T*uPlanet;
+      }
+      sp+=st*T*(1.-clamp(luma(sc.rgb)*6.,0.,1.));
+    }
+    // lens: one clean anamorphic streak, soft bloom, faint ghosts
+    if(uFlare>0.){
+      vec2 d=p-uSunScr;float dl=length(d);
+      vec3 tint=uSunTint;
+      sp+=uFlare*tint*(.55/(1.+pow(dl/.010,2.))+.04/(1.+pow(dl/.05,2.))+.004*exp(-dl*4.));
+      float st=exp(-pow(d.y/.0016,2.))*(exp(-abs(d.x)*3.5)*.22+exp(-abs(d.x)*14.)*1.1);
+      sp+=uFlare*st*mix(vec3(.55,.75,1.),tint,.35)*.9;
+      sp+=uFlare*exp(-pow(d.y/.03,2.))*exp(-abs(d.x)*4.)*vec3(.25,.4,.7)*.02;
+      for(int k=0;k<3;k++){
+        float kk=k==0?-.45:(k==1?-.9:.35);float rad=k==0?.022:(k==1?.042:.014);
+        vec2 gp=uSunScr*kk;float gd=length(p-gp);
+        vec3 gc=k==0?vec3(.35,.8,.7):(k==1?vec3(.9,.65,.35):vec3(.5,.6,1.));
+        sp+=uFlare*gc*(k==1?.0022:.004)*smoothstep(rad,rad*.6,gd)*(.6+.4*smoothstep(rad*.4,rad,gd));
+      }
+    }
+    if(uWarp>0.)sp+=warp(p)*uWarp;
+    col=mix(sp,dc,cover);
+  }else col=dc;
+  col*=uExpo;
+  vec2 vq=uv-.5;col*=1.-.28*dot(vq,vq)*1.6;
+  col=srgb(aces(col));
+  outColor=vec4(dither(col)*uFade,1.);
+}`;
+
+// ------------------------------------------------------------------ timeline (closed form)
+const FOCAL = 1.2, SUN_R = 0.011, T_CREST = 6.85, X_SUN = 0.30;
+// integral of a velocity curve on a fixed grid: depends only on t
+function integrate(v, t, dt = 1 / 600) { let s = 0; const n = Math.floor(t / dt); for (let i = 0; i < n; i++) s += v((i + 0.5) * dt) * dt; return s + v(t) * (t - n * dt); }
+const warpV = t => 2.6 * smooth(lin(t, 1.55, 2.35)) * (1 - smoother(lin(t, 2.6, 4.3)));
+const orbitV = t => 0.072 * smooth(lin(t, 3.0, 6.0)) * (1 - 0.82 * smoother(lin(t, 7.0, 8.6)));
+function camera(t) {
+  const d = mix(1.42, 1.17, smoother(lin(t, 3.0, 6.5)));
+  const phi = 0.4 + integrate(orbitV, t);
+  const up = [0, Math.sin(phi), Math.cos(phi)], vel = [0, Math.cos(phi), -Math.sin(phi)];
+  const pos = V.mul(up, d), dip = Math.acos(1 / d);
+  const yl = mix(-1.15, -0.155, smoother(lin(t, 3.2, 7.3))) + 0.012 * Math.sin(t * 0.7);
+  const psi = dip + Math.atan(yl / FOCAL);
+  const yaw = -0.05 + 0.03 * smoother(lin(t, 3, 9));
+  let F = V.add(V.mul(vel, Math.cos(psi)), V.mul(up, -Math.sin(psi)));
+  F = V.rot(F, up, yaw);
+  const U0 = V.norm(V.sub(up, V.mul(F, V.dot(up, F))));
+  const roll = 0.035 * (1 - smoother(lin(t, 3.4, 8.5)));
+  let R = V.cross(F, U0); let U = U0;
+  R = V.add(V.mul(R, Math.cos(roll)), V.mul(U0, Math.sin(roll))); U = V.cross(R, F);
+  return { pos, F, R, U, d };
+}
+function hitsPlanet(c, x, y) {
+  const rd = V.norm(V.add(V.add(V.mul(c.R, x), V.mul(c.U, y)), V.mul(c.F, FOCAL)));
+  const b = V.dot(c.pos, rd), cc = V.dot(c.pos, c.pos) - 1;
+  return { hit: b * b - cc > 0 && b < 0, rd };
+}
+// Sun direction: the tangent ray at screen x = X_SUN 0.15 s before the crest, so the
+// disc clears the extinction layer and the flare blooms on the 6.85 s downbeat.
+const SUN = (() => {
+  const c = camera(T_CREST - 0.15); let lo = -0.5, hi = 0.5;
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (hitsPlanet(c, X_SUN, m).hit) lo = m; else hi = m; }
+  return hitsPlanet(c, X_SUN, hi).rd;
+})();
+const BR = [11.8, 27.4, 67.0], HR = 0.0045;
+const MOON = V.norm([0.55, 0.62, 0.56]);
+function sunState(c) {
+  const sep = Math.acos(clamp(V.dot(SUN, V.norm(V.mul(c.pos, -1))), -1, 1));
+  const e = sep - Math.asin(1 / c.d);
+  const h = clamp((e + SUN_R) / (2 * SUN_R)), k = 1 - 2 * h;
+  const frac = (Math.acos(k) - k * Math.sqrt(Math.max(0, 1 - k * k))) / Math.PI;
+  const b = -V.dot(c.pos, SUN), r0 = Math.max(V.len(V.add(c.pos, V.mul(SUN, b))), 1 + SUN_R * 0.25);
+  const tau = BR.map(be => be * 2 * HR * Math.exp(-(r0 - 1) / HR) * Math.sqrt(Math.PI * r0 / (2 * HR)));
+  const T = tau.map(x => Math.exp(-x));
+  const scr = [FOCAL * V.dot(SUN, c.R) / V.dot(SUN, c.F), FOCAL * V.dot(SUN, c.U) / V.dot(SUN, c.F)];
+  return { frac, T, scr };
+}
+
+function uniforms(t) {
+  const c = camera(t), s = sunState(c);
+  const tl = 0.2126 * s.T[0] + 0.7152 * s.T[1] + 0.0722 * s.T[2];
+  const bloom = smooth(lin(t, T_CREST - 0.15, T_CREST + 0.35)) * (1 + 0.35 * Math.exp(-Math.pow((t - T_CREST - 0.45) / 0.5, 2)));
+  const hub = -0.36 * (1 - smoother(lin(t, 1.12, 1.30))) + 0.012 * Math.sin(lin(t, 1.30, 1.48) * Math.PI) * (t < 1.48 ? 1 : 0);
+  const crack = 0.010 * smoother(lin(t, 1.42, 1.72));
+  const fly = Math.pow(lin(t, 1.72, 2.75), 2.4) * 1.9;
+  const travel = integrate(warpV, t), shutter = 0.17;
+  return {
+    uCamPos: c.pos, uCamR: c.R, uCamU: c.U, uCamF: c.F, uFocal: FOCAL,
+    uSunDir: SUN, uSunI: 22, uMoon: MOON, uSunR: SUN_R, uSunScr: s.scr,
+    uSunTint: [s.T[0] / Math.max(tl, 1e-3) * 0.9 + 0.1, s.T[1] / Math.max(tl, 1e-3) * 0.9 + 0.1, s.T[2] / Math.max(tl, 1e-3) * 0.9 + 0.1].map(x => Math.min(x, 1.6)),
+    uFlare: s.frac * Math.min(1, tl * 2.2) * bloom * 1.25,
+    uPlanet: smooth(lin(t, 3.0, 3.6)),
+    uDoor: t < 2.85 ? 1 : 0, uOpen: crack + fly, uZoom: 1 + 2.2 * Math.pow(smoother(lin(t, 1.55, 2.8)), 1.6), uHub: hub,
+    uKey: [mix(-1.5, 0.75, smoother(lin(t, 0.0, 2.2))), mix(0.75, 0.42, smooth(lin(t, 0, 2.2))), 0.62],
+    uLight: 0.8 * smooth(lin(t, 0.0, 0.9)) * (1 - 0.6 * smooth(lin(t, 1.9, 2.75))),
+    uTravel: travel, uStreak: travel - integrate(warpV, Math.max(0, t - shutter)),
+    uWarp: smooth(lin(t, 1.45, 1.9)) * (1 - smooth(lin(t, 3.5, 4.4))),
+    uStarsOn: smooth(lin(t, 1.5, 2.2)),
+    uExpo: 1.25,
+    uFade: 1 - smooth(lin(t, 8.35, 8.98)),
+  };
+}
+
+// ------------------------------------------------------------------ score
+async function score(S) {
+  const { ctx, bell, pad, noise, osc, curve, reverb } = S;
+  const hall = reverb(4.2, 11, { decay: 3.6, pre: 0.025, dark: 0.6 }, 0.55);
+  const room = reverb(1.2, 23, { decay: 0.9, pre: 0.008, dark: 0.3 }, 0.35);
+  const sine = (f, pts, pan = 0, send = null, sendAmt = 0.3) => {
+    const g = ctx.createGain(); curve(g.gain, pts);
+    const p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(S.master);
+    if (send) { const sg = ctx.createGain(); sg.gain.value = sendAmt; g.connect(sg); sg.connect(send); }
+    osc('sine', f, pts[0][0], pts[pts.length - 1][0] + 0.02, g); return g;
+  };
+  // 0.0 room tone and sub presence under the sealed door
+  noise({ t0: 0, t1: 2.2, seed: 3, color: 'brown', type: 'lowpass', freq: [[0, 220]], q: 0.4, gain: [[0, 0], [0.8, 0.10], [1.9, 0.08], [2.2, 0]] });
+  sine(36.71, [[0, 0], [1.0, 0.10], [1.32, 0.12], [2.4, 0.42], [2.9, 0.30], [4.2, 0]]);
+  sine(55.0, [[1.4, 0], [2.4, 0.16], [3.6, 0]], 0);
+  // 0.1–1.4 light sweep: faint high air following the key light left → right
+  noise({ t0: 0.1, t1: 1.6, seed: 5, type: 'bandpass', freq: [[0.1, 5200], [1.6, 7600]], q: 2.2, gain: [[0.1, 0], [0.7, 0.05], [1.3, 0.035], [1.6, 0]], pan: [[0.1, -0.7], [1.5, 0.5]], send: hall, sendAmt: 0.5 });
+  // 1.14–1.30 hub turns: fine ratchet ticks
+  [1.15, 1.19, 1.225, 1.255, 1.28].forEach((t, i) => noise({ t0: t, t1: t + 0.03, seed: 40 + i, type: 'bandpass', freq: [[t, 3800 + i * 300]], q: 4, gain: [[t, 0], [t + 0.002, 0.18], [t + 0.03, 0]], pan: [[t, -0.15 + i * 0.07]], send: room, sendAmt: 0.6 }));
+  // 1.30 unlatch: transient + titanium modal partials + low thunk
+  const metalP = [[1, 0.5, 0.42], [2.32, 0.32, 0.28], [3.86, 0.22, 0.2], [5.4, 0.14, 0.12], [7.13, 0.08, 0.07]];
+  noise({ t0: 1.30, t1: 1.34, seed: 61, type: 'bandpass', freq: [[1.30, 2600]], q: 1.2, gain: [[1.30, 0], [1.301, 0.9], [1.34, 0]], send: room, sendAmt: 0.8 });
+  bell({ t: 1.301, f: 587.33, amp: 0.16, pan: -0.05, partials: metalP, attack: 0.002, send: hall, sendAmt: 0.35 });
+  const th = ctx.createGain(); th.gain.setValueAtTime(0, 1.30); th.gain.linearRampToValueAtTime(0.5, 1.305); th.gain.setTargetAtTime(0, 1.305, 0.06); th.connect(S.master);
+  const to = ctx.createOscillator(); to.frequency.setValueAtTime(96, 1.30); to.frequency.exponentialRampToValueAtTime(48, 1.55); to.connect(th); to.start(1.30); to.stop(1.9);
+  // 1.42 release: second, softer latch + pressure breath through the crack
+  bell({ t: 1.43, f: 440, amp: 0.08, pan: 0.1, partials: metalP, attack: 0.003, send: hall, sendAmt: 0.4 });
+  noise({ t0: 1.42, t1: 2.3, seed: 77, type: 'bandpass', freq: [[1.42, 900], [2.3, 3200]], q: 1.6, gain: [[1.42, 0], [1.5, 0.10], [2.0, 0.07], [2.3, 0]], send: hall, sendAmt: 0.3 });
+  // 1.6–2.7 leaves slide apart, widening in stereo
+  for (const [seed, pan] of [[81, -0.65], [82, 0.65]]) noise({ t0: 1.55, t1: 2.9, seed, color: 'brown', type: 'bandpass', freq: [[1.55, 160], [2.7, 520]], q: 1.4, gain: [[1.55, 0], [2.2, 0.55], [2.6, 0.5], [2.9, 0]], pan: [[1.55, pan * 0.2], [2.7, pan]] });
+  // 1.8–4.3 warp: band-passed noise sweeps, two seeds for width
+  for (const [seed, pan, f1] of [[91, -0.55, 2300], [92, 0.55, 2900]]) noise({ t0: 1.8, t1: 4.4, seed, color: 'pink', type: 'bandpass', freq: [[1.8, 420], [2.5, f1], [4.4, 520]], q: 2.4, gain: [[1.8, 0], [2.45, 0.30], [3.1, 0.16], [4.4, 0]], pan: [[1.8, 0], [2.6, pan]], send: hall, sendAmt: 0.35 });
+  // 3.4–6.75 gentle riser: suspended pad opens, airy noise lifts
+  const sus = [73.42, 110.0, 164.81, 196.0, 246.94];
+  pad({ notes: sus, env: [[3.3, 0], [5.0, 0.45], [6.55, 0.85], [6.80, 0.35], [7.1, 0]], cutoff: [[3.3, 260], [6.6, 1500, 'e']], amp: 0.07, spread: 0.7, send: hall, sendAmt: 0.5 });
+  noise({ t0: 4.4, t1: 6.85, seed: 101, color: 'pink', type: 'bandpass', freq: [[4.4, 900], [6.75, 5200, 'e']], q: 1.1, gain: [[4.4, 0], [6.5, 0.07], [6.72, 0.08], [6.85, 0]], pan: [[4.4, -0.2], [6.8, 0.25]], send: hall, sendAmt: 0.5 });
+  // 6.85 the drop: sub bloom + D major add9 + shimmer
+  sine(36.71, [[6.80, 0], [6.86, 0.55], [7.6, 0.36], [8.7, 0]]);
+  sine(73.42, [[6.80, 0], [6.9, 0.16], [8.6, 0]]);
+  const res = [73.42, 110.0, 185.0, 220.0, 329.63, 440.0];
+  pad({ notes: res, env: [[6.78, 0], [7.05, 0.8], [7.8, 0.75], [8.85, 0]], cutoff: [[6.78, 700], [7.3, 2000, 'e'], [8.8, 900]], amp: 0.085, spread: 0.8, send: hall, sendAmt: 0.6 });
+  for (const [f, pan, d] of [[1174.66, -0.5, 0.0], [1479.98, 0.45, 2.1], [1760.0, -0.2, -1.7], [2637.0, 0.6, 1.2]]) {
+    const g = ctx.createGain(); curve(g.gain, [[6.85, 0], [7.4, 0.012], [8.3, 0.010], [8.85, 0]]);
+    const p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(S.master);
+    const sg = ctx.createGain(); sg.gain.value = 1.2; g.connect(sg); sg.connect(hall);
+    osc('sine', f, 6.85, 8.9, g, d); osc('sine', f, 6.85, 8.9, g, d + 6);
+  }
+  // 6.88–7.25 sunrise bell partials, following the flare
+  const glass = [[1, 0.6, 0.9], [2.0, 0.22, 0.5], [2.76, 0.16, 0.36], [4.07, 0.08, 0.2], [5.4, 0.04, 0.12]];
+  bell({ t: 6.88, f: 880.0, amp: 0.10, pan: 0.25, partials: glass, attack: 0.006, send: hall, sendAmt: 0.7, dur: 2.0 });
+  bell({ t: 7.04, f: 1318.51, amp: 0.07, pan: 0.4, partials: glass, attack: 0.006, send: hall, sendAmt: 0.75, dur: 1.8 });
+  bell({ t: 7.22, f: 1174.66, amp: 0.06, pan: 0.1, partials: glass, attack: 0.006, send: hall, sendAmt: 0.8, dur: 1.6 });
+  // 7.65 arrival chime
+  bell({ t: 7.65, f: 1479.98, amp: 0.05, pan: -0.25, partials: glass, attack: 0.008, send: hall, sendAmt: 0.9, dur: 1.2 });
+  bell({ t: 7.66, f: 2349.32, amp: 0.025, pan: -0.3, partials: glass, attack: 0.008, send: hall, sendAmt: 0.9, dur: 1.1 });
+  // master fade
+  curve(S.master.gain, [[0, 1], [7.9, 1], [8.75, 0]]);
+}
+
+OrbitKit.film({ duration: D, poster: 7.8, sceneScale: 0.5, scene: SCENE, composite: COMPOSITE, uniforms, score });
+</script>
+</body></html>
