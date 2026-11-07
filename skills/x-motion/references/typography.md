@@ -40,6 +40,6 @@ Kinetic typography can be forceful without making every word compete. Decide whi
 
 Wait for font loading before measuring or capturing. Fix composition dimensions; avoid accidental reflow caused by font swap, viewport differences, or missing assets. If measurement is needed, perform it from loaded, stable assets rather than changing layout asynchronously during capture.
 
-Inspect the longest line, densest frame, each text transition, and the final card. Check that text is not clipped by containers, masks, or frame edges at any sampled extreme. Validate exact copy independently of aesthetic review.
+Inspect the longest line, densest frame, each text transition, and the final card. Check that text is not clipped by containers, masks, or frame edges at any sampled extreme. When cards sit over footage cut from other films, sample each card at full opacity against the actual frame beneath it: a title that cleared the source film can land on the subject once the cut is retimed. Validate exact copy independently of aesthetic review.
 
 For silent-first work, the visual track must carry the required message. For narrated work, captions should be legible and synchronized rather than treated as decorative subtitles. Do not assume automated transcription is correct without checking names, numbers, and technical terms.

@@ -45,6 +45,7 @@ Work in linear light, add light energies, then tone-map and convert to sRGB once
 - Lead the eye with light: the beam, the rolling direction or the ripple should travel toward where the payoff will happen.
 - Keep the edges of the frame quiet and slightly darker (a 6–10% vignette made from the lighting, not a black ring).
 - No text, UI, logos or decorative particles. If the phenomenon needs a scale reference, use a printed grid, a stone joint or a shadow.
+- In a narrated long film, set title cards in the empty light, never over the glass: the opening title sits below the prism, the closing one below the lens. When a cut holds a near-still image under narration, a slow push of a few percent toward the focus keeps it alive without competing with the voice.
 
 ## Motion vocabulary and timing
 
