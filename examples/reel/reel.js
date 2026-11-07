@@ -62,7 +62,10 @@
           const win = frame.contentWindow, doc = frame.contentDocument;
           if (typeof win.renderFrame !== 'function') throw new Error(`${src} has no renderFrame`);
           await doc.fonts.ready;
-          const canvas = [...doc.querySelectorAll('canvas')].find(c => c.width === W && c.height === H);
+          const find = () => [...doc.querySelectorAll('canvas')].find(c => c.width === W && c.height === H);
+          // Some scenes (Prism) create their GL canvas lazily on the first frame they draw.
+          if (!find()) await win.renderFrame(0);
+          const canvas = find();
           if (!canvas) throw new Error(`${src} has no ${W}x${H} canvas`);
           resolve({ src, win, canvas, motion: win.motion });
         } catch (error) { reject(error); }
