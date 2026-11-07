@@ -48,7 +48,7 @@ const uniforms = t => ({ uFade: smooth(lin(t, 0, 0.5)) * (1 - smooth(lin(t, 58.5
 
 const cards = [
   { className: 'ink', html: '<div class="kicker">X Motion · Sumi</div><div class="title">One Breath</div>', at: [0.6, 1.9, 3.0, 4.0], rise: 10, lift: 6, blur: 8, track: [0.04, -0.02] },
-  { className: 'ink low', html: '<div class="title">One Breath</div><div class="sub">Bloom · Mist · Stroke</div>', at: [52.0, 53.6, 58.2, 59.4], rise: 10, blur: 6, track: [0.03, -0.02] },
+  { className: 'ink colophon', html: '<div class="title">One Breath</div><div class="sub">Bloom · Mist · Stroke</div>', at: [52.0, 53.6, 58.2, 59.4], rise: 10, blur: 6, track: [0.03, -0.02] },
 ];
 
 // ------------------------------------------------------------------ score + sound
@@ -85,10 +85,10 @@ async function score(S, FX, R) {
   // ---- sound effects
   // wind and paper: a soft air bed that thins when the brush comes down
   FX.noise({ t0: 0, t1: 60, seed: 71, color: 'pink', type: 'bandpass', freq: [[0, 500], [22, 900], [36, 700], [40, 400], [60, 400]], q: 0.5, gain: [[0, 0], [3, 0.05], [18, 0.04], [24, 0.09], [34, 0.08], [39.5, 0.025], [57, 0.025], [60, 0]], pan: [[0, -0.2], [30, 0.3], [60, 0]] });
-  // the drop: a tiny falling tone, then the touch on wet paper
+  // the drop: a tiny falling tone, then the touch on wet paper (kept under the first line)
   const dg = FX.ctx.createGain(); FX.curve(dg.gain, [[drop - 0.5, 0], [drop - 0.3, 0.01], [drop, 0.014], [drop + 0.01, 0]]); dg.connect(FX.master);
   const dob = FX.osc('sine', hz(98), drop - 0.5, drop + 0.02, dg); FX.automate(dob.frequency, [[drop - 0.5, hz(98)], [drop, hz(91), 'e']]);
-  const tg = FX.ctx.createGain(); FX.curve(tg.gain, [[drop, 0], [drop + 0.004, 0.35], [drop + 0.25, 0]]); tg.connect(FX.master); tg.connect(fxRoom);
+  const tg = FX.ctx.createGain(); FX.curve(tg.gain, [[drop, 0], [drop + 0.004, 0.18], [drop + 0.25, 0]]); tg.connect(FX.master); tg.connect(fxRoom);
   const to = FX.osc('sine', 210, drop, drop + 0.3, tg); FX.automate(to.frequency, [[drop, 210], [drop + 0.1, 95, 'e']]);
   // the bloom spreading, then letting go into mist
   const b0 = at('bloom', 2.0), b1 = at('bloom', 6.0), b2 = at('bloom', 8.4);
