@@ -45,14 +45,18 @@ Render a film with `node scripts/render.mjs examples/orbit/passage.html --out re
 
 ## Narrated films
 
-One Orbit (XM-0013) is a 60 s film cut by the shared reel engine (`examples/reel/`) from Passage, Terminator and Eclipse, with Kokoro narration, an original score, effects placed on picture events and WebVTT captions.
+Each theme has a 60 s film cut by the shared reel engine (`examples/reel/`) from its three short films. Each has Kokoro narration, an original score, effects placed on picture events and WebVTT captions. One Orbit uses Passage, Terminator and Eclipse; Bending Light uses Dispersion, Caustics and Lens; One Breath uses Bloom, Mist and Stroke.
 
 | ID | Film | Length | Integrated | True peak | Narration (Whisper base.en on the final MP4) |
 | --- | --- | --- | --- | --- | --- |
 | XM-0013 | One Orbit | 60 s | -18 LUFS | -1.7 dBFS | 0/91 word errors |
+| XM-0014 | Bending Light | 60 s | -18 LUFS | -1.7 dBFS | 2/95 word errors ("violet" heard as "vile it"; the dry voice track scores 3/95) |
+| XM-0015 | One Breath | 60 s | -18 LUFS | -1.7 dBFS | 2/66 word errors (word boundaries only; letter error rate 0.0 %) |
 
-- Rendered 1,800 frames at 1920×1080, 30 fps (H.264 and AAC, 60.0 s). The storyboard stills were inspected as images.
-- Bending Light (Prism) and One Breath (Sumi) are committed as sources and will be published after they render.
+- Each film rendered 1,800 frames at 1920×1080, 30 fps (H.264 and AAC, 60.0 s) into a fresh directory. The renderer's frame and audio determinism checks passed. Every MP4 decodes end to end, and ffmpeg's loudness meter on the MP4 matches the manifest.
+- Before the full renders, short probes measured frame cost per section (about 0.9 to 2.1 s per frame), the voice-to-bed balance of every line, and title cards against their actual frames. Two cards that crossed the subject were moved: the Bending Light opening card sits below the prism, and the One Breath end card sits above the seal. Two transients that were louder than the line over them were lowered: the Caustics drop and the Bloom touch. Bending Light also gained a 5 % push-in over its final held lens shot.
+- Reviewed as images: a 20-frame contact sheet decoded from each MP4 (one frame every 3 s), plus each poster.
+- Prism scenes create their WebGL canvas on the first frame they draw. The reel engine now renders frame 0 when a scene has no canvas yet. `tests/render-browser.test.mjs` covers this with a scene whose canvas appears only after its first frame.
 
 ## Review notes
 
@@ -61,6 +65,6 @@ One Orbit (XM-0013) is a 60 s film cut by the shared reel engine (`examples/reel
 
 ## Not established
 
-Nobody has watched the films end to end or listened to the scores for this record. Loudness numbers are measurements, not a listening review. Browser checks prove playback works, not that pacing or sound are good. No phone performance benchmark was run.
+The owner approved One Orbit (XM-0013). Apart from that, nobody has watched the films end to end or listened to the scores for this record. Bending Light and One Breath await review. Their pacing, their transitions in motion and their scores have not been seen or heard, only measured: voice-to-bed balance, loudness and Whisper scores. Loudness numbers are measurements, not a listening review. Browser checks prove playback works, not that pacing or sound are good. No phone performance benchmark was run.
 
-All nine films and three theme skills were authored by Claude Opus 5.5 sessions; the lead session (also Opus 5.5) made the Terminator colour fix.
+All nine films and three theme skills were authored by Claude Opus 5.5 sessions; the lead session (also Opus 5.5) made the Terminator colour fix. The three narrated films were authored and rendered by Opus 5.5 sessions.
