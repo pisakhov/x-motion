@@ -62,8 +62,8 @@ export function validateMotion(value) {
     if (!Number.isInteger(number) || number < 2 || number > 3840 || number % 2)
       throw new Error(`${key} must be an even integer from 2 to 3840`);
   }
-  if (!Number.isFinite(duration) || duration <= 0 || duration > 120)
-    throw new Error('duration must be finite and in (0, 120] seconds');
+  if (!Number.isFinite(duration) || duration <= 0 || duration > 300)
+    throw new Error('duration must be finite and in (0, 300] seconds');
   if (!Number.isInteger(fps) || fps < 1 || fps > 60)
     throw new Error('fps must be an integer from 1 to 60');
   if (poster !== undefined && (!Number.isFinite(poster) || poster < 0 || poster >= duration))

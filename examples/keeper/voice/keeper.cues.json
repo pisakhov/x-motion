@@ -1,0 +1,67 @@
+{
+  "sampleRate": 48000,
+  "duration": 165,
+  "lineLufs": -20.0,
+  "peakDbfs": -2.0,
+  "voice": "bf_isabella",
+  "lang": "en-gb",
+  "model": "Kokoro-82M v1.0 (Apache-2.0) via kokoro-onnx (MIT)",
+  "files": {
+    "kokoro-v1.0.onnx": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
+    "voices-v1.0.bin": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+  },
+  "packages": {
+    "kokoro-onnx": "0.6.1",
+    "onnxruntime": "1.31.1",
+    "numpy": "2.5.4",
+    "soundfile": "0.14.0"
+  },
+  "audioSha256": "4b7ff4b0b71a2ba13ad299df9c2f01fa2f24b1102c304c799973e3cf94f6c1a2",
+  "lines": [
+    {
+      "start": 16.0,
+      "end": 18.1806,
+      "text": "For forty years, I kept this light."
+    },
+    {
+      "start": 20.5,
+      "end": 24.7977,
+      "text": "Three flashes, every fifteen seconds. Its name, written on the dark."
+    },
+    {
+      "start": 29.0,
+      "end": 32.4718,
+      "text": "Most nights, no one was out there. You light it anyway."
+    },
+    {
+      "start": 47.0,
+      "end": 48.5192,
+      "text": "Tonight, someone was."
+    },
+    {
+      "start": 77.0,
+      "end": 78.5336,
+      "text": "Then the lamp went out."
+    },
+    {
+      "start": 87.0,
+      "end": 90.3647,
+      "text": "All I had left was one small flame. And the glass."
+    },
+    {
+      "start": 105.0,
+      "end": 107.7148,
+      "text": "Glass doesn't make light. It makes it reach."
+    },
+    {
+      "start": 145.5,
+      "end": 148.2498,
+      "text": "And out of the dark, three flashes came back."
+    },
+    {
+      "start": 154.0,
+      "end": 156.6381,
+      "text": "Somewhere tonight, someone is keeping a light for you."
+    }
+  ]
+}
