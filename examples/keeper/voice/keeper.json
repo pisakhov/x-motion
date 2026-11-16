@@ -1,0 +1,18 @@
+{
+  "title": "Keeper",
+  "voice": "bf_isabella",
+  "lang": "en-gb",
+  "speed": 0.88,
+  "duration": 165,
+  "lines": [
+    { "at": 16.0, "text": "For forty years, I kept this light." },
+    { "at": 20.5, "text": "Three flashes, every fifteen seconds. Its name, written on the dark." },
+    { "at": 29.0, "text": "Most nights, no one was out there. You light it anyway." },
+    { "at": 47.0, "text": "Tonight, someone was." },
+    { "at": 77.0, "text": "Then the lamp went out." },
+    { "at": 87.0, "text": "All I had left was one small flame. And the glass." },
+    { "at": 105.0, "text": "Glass doesn't make light. It makes it reach." },
+    { "at": 145.5, "text": "And out of the dark, three flashes came back." },
+    { "at": 154.0, "text": "Somewhere tonight, someone is keeping a light for you." }
+  ]
+}

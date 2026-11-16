@@ -92,7 +92,7 @@ test('renderer navigation explicitly enables composition render mode (source con
 
 test('metadata has bounded finite dimensions, duration and fps', () => {
   assert.deepEqual(validateMotion(motion), motion);
-  for (const [key, values] of Object.entries({ width: [0, 1, 1279, 3842, NaN, Infinity, '1280'], height: [-2, 3, 4000], duration: [0, -1, 121, Infinity, NaN, '2'], fps: [0, 61, 29.97, Infinity, '24'] }))
+  for (const [key, values] of Object.entries({ width: [0, 1, 1279, 3842, NaN, Infinity, '1280'], height: [-2, 3, 4000], duration: [0, -1, 301, Infinity, NaN, '2'], fps: [0, 61, 29.97, Infinity, '24'] }))
     for (const value of values) assert.throws(() => validateMotion({ ...motion, [key]: value }), `${key}: ${value}`);
   assert.throws(() => validateMotion(null));
   assert.throws(() => validateMotion({}));
@@ -103,7 +103,7 @@ test('frame times are deterministic, finite, aligned and exclude duration endpoi
   assert.equal(frameTimes(motion).length, 48);
   assert.equal(frameTimes({ ...motion, duration: 0.14, fps: 50 }).length, 7);
   assert.deepEqual(frameTimes({ ...motion, duration: 0.001 }, true), [0, 0, 0, 0, 0]);
-  for (const duration of [0.001, 1.01, 120]) {
+  for (const duration of [0.001, 1.01, 120, 300]) {
     const times = frameTimes({ ...motion, duration });
     assert.ok(times.every(time => Number.isFinite(time) && time >= 0 && time < duration));
   }

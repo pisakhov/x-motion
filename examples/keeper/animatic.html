@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Keeper · animatic · X Motion</title>
+<style>
+@font-face { font-family: Geist; src: url(../reel/fonts/geist.woff2) format("woff2"); font-weight: 100 900; font-display: block; }
+html, body { margin: 0; width: 960px; height: 540px; overflow: hidden; background: #000; }
+canvas { position: absolute; left: 0; top: 0; width: 960px; height: 540px; display: block; }
+</style>
+</head><body>
+<script src="../orbit/kit.js"></script>
+<script src="../reel/reel.js"></script>
+<script>
+'use strict';
+// Keeper, ANIMATIC. A 2:45 timing test of the approved outline: rough canvas sketches in motion, the real
+// narration track and a scratch score. Not the film: no final art, lighting or sound design.
+// A lighthouse keeper's lamp goes out the night someone is lost at sea; one match and the lens relight it.
+// Render: node scripts/render.mjs examples/keeper/animatic.html --root examples --out renders/keeper-animatic --video
+const K = window.OrbitKit, { clamp, lin, smooth, smoother, mix } = K;
+const D = 165, S = 1.5, W = 640, H = 360;          // drawn in 640x360 sketch units, output 960x540
+const RENDER = new URLSearchParams(location.search).get('render') === '1';
+const PI = Math.PI, TAU = PI * 2;
+
+// ------------------------------------------------------------------ timeline
+const FLASH = [9, 22, 37, 52, 66, 106, 120, 134];   // the light's signature: three flashes, from each time
+const ANSWER = [141];                               // the boat answers
+const LAST = [157];                                 // one light on the night side
+const BLACK = [72, 76];
+const RING0 = 100, RING_STEP = 0.9, RINGS = 9;      // the lens catches the flame, ring by ring
+const BEATS = [
+  [0, 'Prologue', 'Streaming'], [8, 'Prologue', 'One point'],
+  [14, 'I · The Fog', 'The rock'], [26, 'I · The Fog', 'The glass'], [40, 'I · The Fog', 'Someone out there'],
+  [58, 'II · The Dark', 'Storm'], [72, 'II · The Dark', 'Out'], [84, 'II · The Dark', 'One match'], [98, 'II · The Dark', 'The glass gathers it'],
+  [112, 'III · Found', 'Ride the beam'], [128, 'III · Found', 'Focus'], [140, 'III · Found', 'The answer'], [152, 'III · Found', 'One of many'],
+];
+const pulse = a => a < 0 ? 0 : a < 0.12 ? a / 0.12 : Math.exp(-(a - 0.12) / 0.45);
+const sig = (t, groups, offs = [0, 1.1, 2.2]) => { let m = 0; for (const g of groups) for (const o of offs) m = Math.max(m, pulse(t - g - o)); return m; };
+const ANSWER_OFFS = [0, 1.2, 2.25];                 // a hand-held lantern: not quite even
+
+// ------------------------------------------------------------------ canvas kit
+function rng(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function layer(attach) { const cv = document.createElement('canvas'); cv.width = W * S; cv.height = H * S; if (attach) document.body.appendChild(cv); return { cv, c: cv.getContext('2d') }; }
+const MAIN = layer(true), LA = layer(), LB = layer(), SC = layer();
+// Draw fn on a scratch layer under c's transform, then composite it once through a blur.
+function blurred(c, px, fn, comp = 'source-over', alpha = 1) {
+  const s = SC.c; s.setTransform(1, 0, 0, 1, 0, 0); s.clearRect(0, 0, W * S, H * S); s.setTransform(c.getTransform());
+  s.globalAlpha = 1; s.globalCompositeOperation = 'source-over'; s.filter = 'none'; fn(s);
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.filter = px > 0.05 ? `blur(${(px * S).toFixed(2)}px)` : 'none';
+  c.globalCompositeOperation = comp; c.globalAlpha = alpha; c.drawImage(SC.cv, 0, 0); c.restore();
+}
+function cam(c, cx, cy, z, dx = 0, dy = 0) { c.translate(cx + dx, cy + dy); c.scale(z, z); c.translate(-cx, -cy); }
+function sky(c, top, bot, hy = H) { const g = c.createLinearGradient(0, 0, 0, hy); g.addColorStop(0, top); g.addColorStop(1, bot); c.fillStyle = g; c.fillRect(-40, -40, W + 80, hy + 40); }
+function stars(c, seed, n, maxY, a, t) { const r = rng(seed); for (let i = 0; i < n; i++) { const b = r(), x = r() * W, y = r() * maxY, ph = r() * TAU, sp = 0.5 + r() * 1.5; c.fillStyle = `rgba(235,238,250,${a * (0.15 + b * 0.8) * (0.75 + 0.25 * Math.sin(t * sp + ph))})`; const d = b > 0.93 ? 1.6 : 0.9; c.fillRect(x, y, d, d); } }
+function sea(c, hy, seed, t, { col = '#05080e', waves = 60, wa = 0.12, swell = 0 } = {}) {
+  const g = c.createLinearGradient(0, hy, 0, H); g.addColorStop(0, '#0b1320'); g.addColorStop(1, col); c.fillStyle = g; c.fillRect(-40, hy, W + 80, H - hy + 40);
+  const r = rng(seed); c.save(); c.lineCap = 'round';
+  for (let i = 0; i < waves; i++) {
+    const k = Math.pow(r(), 1.6), x0 = r() * W * 1.3, ph = r() * TAU, sp = 0.6 + r() * 0.6;
+    const y = hy + k * (H - hy) + Math.sin(t * sp + ph) * (0.6 + k * 2.4) * (1 + swell * 3), len = 8 + k * 60;
+    const x = (x0 + t * (3 + k * 16) * (1 + swell * 2)) % (W * 1.3) - W * 0.15;
+    c.strokeStyle = `rgba(190,205,225,${wa * (0.3 + k) * (0.65 + 0.35 * Math.sin(t * 0.9 + ph))})`; c.lineWidth = 0.6 + k * 1.4;
+    c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + len / 2, y - 1.5 - k * 3 * (1 + swell * 2), x + len, y); c.stroke();
+  }
+  c.restore();
+}
+function fog(c, seed, n, y0, y1, a, blur, t, drift = 5, col = '220,212,196') {
+  blurred(c, blur, s => { const r = rng(seed); for (let i = 0; i < n; i++) {
+    const x0 = r() * W * 1.5, y = mix(y0, y1, r()), rx = 70 + r() * 180, ry = 8 + r() * 26, al = a * (0.5 + r() * 0.5), sp = 0.4 + r(), ph = r() * TAU;
+    const x = (x0 + t * drift * sp) % (W * 1.5) - W * 0.25;
+    s.fillStyle = `rgba(${col},${al * (0.8 + 0.2 * Math.sin(t * 0.3 + ph))})`; s.beginPath(); s.ellipse(x, y, rx, ry, 0, 0, TAU); s.fill(); } });
+}
+function glow(c, x, y, rad, rgb, a) { if (a <= 0 || rad <= 0) return; c.save(); c.globalCompositeOperation = 'lighter'; const g = c.createRadialGradient(x, y, 0, x, y, rad); g.addColorStop(0, `rgba(${rgb},${Math.min(1, a)})`); g.addColorStop(0.35, `rgba(${rgb},${Math.min(1, a) * 0.35})`); g.addColorStop(1, `rgba(${rgb},0)`); c.fillStyle = g; c.fillRect(x - rad, y - rad, rad * 2, rad * 2); c.restore(); }
+function beam(c, ox, oy, ang, len, spread, a, blur = 4, rgb = '255,246,226') {
+  if (a <= 0.003) return;
+  blurred(c, blur, s => { const ex = ox + Math.cos(ang) * len, ey = oy + Math.sin(ang) * len;
+    const g = s.createLinearGradient(ox, oy, ex, ey); g.addColorStop(0, `rgba(${rgb},${Math.min(1, a)})`); g.addColorStop(0.6, `rgba(${rgb},${Math.min(1, a) * 0.3})`); g.addColorStop(1, `rgba(${rgb},0)`);
+    s.fillStyle = g; s.beginPath(); s.moveTo(ox, oy - 2); s.lineTo(ox + Math.cos(ang - spread) * len, oy + Math.sin(ang - spread) * len); s.lineTo(ox + Math.cos(ang + spread) * len, oy + Math.sin(ang + spread) * len); s.lineTo(ox, oy + 2); s.fill(); }, 'lighter');
+}
+function rock(c, x, base, w, seed) { const r = rng(seed); c.fillStyle = '#030508'; c.beginPath(); c.moveTo(x - w, H + 40); c.lineTo(x - w, base + 14); for (let i = 0; i <= 10; i++) c.lineTo(mix(x - w, x + w, i / 10), base - Math.sin(i / 10 * PI) * 18 + r() * 8); c.lineTo(x + w, H + 40); c.fill(); }
+function lighthouse(c, x, base, h, lit = 1) {
+  const bw = h * 0.17, tw = h * 0.105, top = base - h;
+  c.fillStyle = '#0a0f17'; c.beginPath(); c.moveTo(x - bw / 2, base); c.lineTo(x - tw / 2, top + h * 0.14); c.lineTo(x + tw / 2, top + h * 0.14); c.lineTo(x + bw / 2, base); c.fill();
+  c.fillStyle = 'rgba(160,175,195,.07)'; c.beginPath(); c.moveTo(x + bw * 0.15, base); c.lineTo(x + tw * 0.12, top + h * 0.14); c.lineTo(x + tw / 2, top + h * 0.14); c.lineTo(x + bw / 2, base); c.fill();
+  c.fillStyle = '#0a0f17'; c.fillRect(x - tw * 0.75, top + h * 0.12, tw * 1.5, h * 0.03);
+  const l = clamp(lit); c.fillStyle = `rgb(${mix(20, 255, l) | 0},${mix(26, 207, l) | 0},${mix(34, 134, l) | 0})`; c.fillRect(x - tw * 0.4, top + h * 0.03, tw * 0.8, h * 0.09);
+  c.fillStyle = '#0a0f17'; c.fillRect(x - tw * 0.06, top + h * 0.03, tw * 0.12, h * 0.09);
+  c.beginPath(); c.moveTo(x - tw * 0.55, top + h * 0.035); c.lineTo(x, top - h * 0.03); c.lineTo(x + tw * 0.55, top + h * 0.035); c.fill();
+  glow(c, x, top + h * 0.075, h * 0.5 * (0.5 + 0.5 * lit), '255,190,110', 0.55 * lit);
+  return [x, top + h * 0.075];
+}
+function boatShape(c, x, y, s, tilt = 0) {
+  c.save(); c.translate(x, y); c.rotate(tilt); c.fillStyle = '#020306';
+  c.beginPath(); c.moveTo(-22 * s, 0); c.lineTo(24 * s, 0); c.lineTo(17 * s, 7 * s); c.lineTo(-17 * s, 7 * s); c.fill();
+  c.fillRect(-1 * s, -34 * s, 1.6 * s, 34 * s);
+  c.beginPath(); c.moveTo(-6 * s, -2 * s); c.lineTo(-6 * s, -14 * s); c.quadraticCurveTo(-3 * s, -18 * s, -1 * s, -15 * s); c.lineTo(-1 * s, -2 * s); c.fill();
+  c.beginPath(); c.arc(-3.5 * s, -17 * s, 2.6 * s, 0, TAU); c.fill(); c.restore();
+}
+// A boat with its lantern. blur in sketch px (0 = the one perfect focus); lift raises the lantern.
+function boat(c, x, y, s, blur, light, tilt = 0, lift = 0) {
+  blurred(c, blur, k => boatShape(k, x, y, s, tilt));
+  const lx = x + 12 * s, ly = y - (10 + lift) * s, soft = clamp(blur / 3.2);
+  glow(c, lx, ly, mix(26, 40, soft) * s * (0.6 + 0.4 * light), '255,176,80', 0.9 * light);
+  c.fillStyle = `rgba(255,224,170,${clamp(light)})`; c.beginPath(); c.arc(lx, ly, mix(1.8, 2.6, soft) * s, 0, TAU); c.fill();
+  return [lx, ly];
+}
+function rain(c, seed, n, ang, a, len, t, speed = 520) {
+  if (a <= 0 || n <= 0) return; const r = rng(seed); c.save(); c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
+  const dx = Math.cos(ang), dy = Math.sin(ang);
+  for (let i = 0; i < n; i++) { const x0 = r() * (W + 300), y0 = r() * (H + 80), l = len * (0.5 + r()), al = a * (0.3 + r() * 0.7), lw = 0.5 + r() * 0.9, sp = speed * (0.7 + r() * 0.6);
+    const y = (y0 + t * sp * dy) % (H + 80) - 40, x = ((x0 + t * sp * dx) % (W + 300) + W + 300) % (W + 300) - 150;
+    c.strokeStyle = `rgba(200,215,235,${al})`; c.lineWidth = lw; c.beginPath(); c.moveTo(x, y); c.lineTo(x + dx * l, y + dy * l); c.stroke(); }
+  c.restore();
+}
+// The streaming blur: horizontal streaks of light that can gather toward one point.
+function streaks(c, seed, n, blur, t, converge, cx, cy, a = 1) {
+  if (a <= 0) return;
+  blurred(c, blur, s => { const r = rng(seed); s.lineCap = 'round';
+    for (let i = 0; i < n; i++) { const y0 = r() * H, cv = 0.5 + r() * 0.5, x0 = r() * W * 1.6, l0 = 60 + r() * 260, warm = r() < 0.3, al = (0.15 + r() * 0.5) * a, lw = 1 + r() * 5, sp = 14 + r() * 46;
+      const k = clamp(converge * (0.55 + cv * 0.9)), y = mix(y0, cy, k), l = l0 * (1 - k * 0.92);
+      const x = mix((x0 + t * sp) % (W * 1.6) - W * 0.3, cx - l / 2, k);
+      const rgb = warm ? '255,190,120' : '190,210,240', g = s.createLinearGradient(x, y, x + l, y);
+      g.addColorStop(0, `rgba(${rgb},0)`); g.addColorStop(0.5, `rgba(${rgb},${al * (1 - k * 0.6)})`); g.addColorStop(1, `rgba(${rgb},0)`);
+      s.strokeStyle = g; s.lineWidth = lw * (1 - k * 0.6); s.beginPath(); s.moveTo(x, y); s.lineTo(x + l + 0.01, y); s.stroke(); } }, 'lighter');
+}
+function vignette(c, a = 0.65) { const g = c.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, W * 0.65); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${a})`); c.save(); c.setTransform(S, 0, 0, S, 0, 0); c.fillStyle = g; c.fillRect(0, 0, W, H); c.restore(); }
+// The Fresnel lens seen head-on. lit(i) in 0..1 for ring i (1 = innermost); a highlight turns with the clockwork.
+function lens(c, cx, cy, R, lit, spectral, t, seed, turn = 1) {
+  c.fillStyle = '#07090c'; c.fillRect(-40, -40, W + 80, H + 80);
+  c.strokeStyle = 'rgba(160,120,60,.35)'; c.lineWidth = 2; for (let i = -3; i <= 3; i++) { c.beginPath(); c.moveTo(cx + i * R * 0.55, -40); c.lineTo(cx + i * R * 0.55, H + 40); c.stroke(); }
+  let total = 0;
+  for (let i = RINGS; i >= 1; i--) {
+    const rr = R * i / RINGS, on = clamp(lit(i)); total += on / RINGS;
+    const g = c.createRadialGradient(cx, cy, rr * 0.82, cx, cy, rr);
+    g.addColorStop(0, 'rgba(30,40,52,.6)');
+    g.addColorStop(0.75, `rgba(${mix(120, 255, on) | 0},${mix(140, 214, on) | 0},${mix(165, 150, on) | 0},${0.14 + on * 0.5})`);
+    g.addColorStop(1, 'rgba(10,14,20,.9)');
+    c.fillStyle = g; c.beginPath(); c.arc(cx, cy, rr, 0, TAU); c.fill();
+    const a0 = t * 0.35 * turn + i * 0.7; c.save(); c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
+    c.strokeStyle = `rgba(255,236,200,${0.05 + on * 0.3})`; c.lineWidth = 1.6; c.beginPath(); c.arc(cx, cy, rr - 2, a0, a0 + 0.9); c.stroke();
+    c.beginPath(); c.arc(cx, cy, rr - 2, a0 + PI, a0 + PI + 0.5); c.stroke();
+    if (spectral > 0 && on > 0.5) { c.strokeStyle = `hsla(${(i * 37) % 360},90%,70%,${0.35 * spectral})`; c.lineWidth = 1.2; c.beginPath(); c.arc(cx, cy, rr - 1, 0, TAU); c.stroke(); }
+    c.restore();
+  }
+  glow(c, cx, cy, R * (0.5 + total * 1.4), '255,200,130', total > 0 ? 0.25 + total * 0.5 : 0);
+  if (total > 0.2) { const r = rng(seed); c.save(); c.globalCompositeOperation = 'lighter'; c.lineWidth = 1;
+    for (let i = 0; i < 28; i++) { const x0 = r() * W, y0 = r() * H, al = (0.05 + r() * 0.12) * total, ph = r() * TAU, x = x0 + Math.sin(t * 0.5 + ph) * 14, y = y0 + Math.cos(t * 0.4 + ph) * 9;
+      c.strokeStyle = `rgba(255,220,170,${al * (0.6 + 0.4 * Math.sin(t * 1.3 + ph))})`; c.beginPath(); c.moveTo(x, y); c.bezierCurveTo(x + 20, y - 10, x + 30, y + 14, x + 52, y + 2); c.stroke(); }
+    c.restore(); }
+  return total;
+}
+function flame(c, x, y, s, t, a = 1) {
+  const fl = 1 + 0.07 * Math.sin(t * 11) + 0.05 * Math.sin(t * 17.3 + 1) + 0.04 * Math.sin(t * 5.1), lean = Math.sin(t * 3.1) * 1.5 * s;
+  glow(c, x, y - 4 * s, 80 * s * fl, '255,170,70', 0.9 * a);
+  c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = a; const hgt = 20 * s * fl;
+  const g = c.createLinearGradient(x, y, x, y - hgt); g.addColorStop(0, 'rgba(140,170,255,.8)'); g.addColorStop(0.3, 'rgba(255,210,140,1)'); g.addColorStop(1, 'rgba(255,150,60,0)');
+  c.fillStyle = g; c.beginPath(); c.moveTo(x + lean, y - hgt); c.bezierCurveTo(x + 5 * s, y - 8 * s, x + 5 * s, y, x, y); c.bezierCurveTo(x - 5 * s, y, x - 5 * s, y - 8 * s, x + lean, y - hgt); c.fill(); c.restore();
+}
+function smoke(c, x, y, grow, t) {
+  if (grow <= 0) return;
+  blurred(c, 2.2, s => { s.lineCap = 'round';
+    for (let k = 0; k < 3; k++) { const w = Math.sin(t * 0.7 + k) * 8, top = y - 24 - 126 * grow;
+      s.strokeStyle = `rgba(200,195,185,${(0.22 - k * 0.05) * Math.min(1, grow * 2)})`; s.lineWidth = 3 + k * 3;
+      s.beginPath(); s.moveTo(x, y - 24); s.bezierCurveTo(x + (18 + k * 6) * grow + w, mix(y - 24, y - 60, grow), x - (26 + k * 8) * grow - w, mix(y - 24, y - 90, grow), x + (10 + k * 10) * grow + w * 0.5, top); s.stroke(); } });
+}
+// Text is light coming into focus: every glyph rises and sharpens in a stagger.
+function resolveText(c, parts, x, y, font, t, t0, stagger, dur, alpha, rgb = '246,241,228') {
+  c.save(); c.font = font; c.textBaseline = 'middle';
+  for (const [i, p] of parts.entries()) {
+    const k = smoother(lin(t, t0 + i * stagger, t0 + i * stagger + dur)); if (k <= 0) { x += p.w; continue; }
+    c.filter = k < 0.995 ? `blur(${((1 - k) * 7 * S).toFixed(2)}px)` : 'none';
+    c.fillStyle = `rgba(${rgb},${alpha * k})`; c.fillText(p.s, x, y + (1 - k) * 6); x += p.w;
+  }
+  c.restore();
+}
+function title(c, t, t0, y, size, alpha) {
+  if (alpha <= 0 || t < t0) return;
+  c.save(); c.font = `250 ${size}px Geist`; const sp = size * 0.32;
+  const parts = [...'KEEPER'].map(s => ({ s, w: c.measureText(s).width + sp })); c.restore();
+  const total = parts.reduce((a, p) => a + p.w, 0) - sp;
+  resolveText(c, parts, W / 2 - total / 2, y, `250 ${size}px Geist`, t, t0, 0.22, 1.3, alpha);
+}
+
+// ------------------------------------------------------------------ scenes
+const lamp = t => sig(t, FLASH);
+const SCENES = [
+  // Prologue: the streaming blur gathers into one far light, which signs its name.
+  { t0: 0, t1: 14.8, fn(c, t) {
+    c.fillStyle = '#010204'; c.fillRect(0, 0, W, H);
+    const k = smoother(lin(t, 7.2, 10.6)), a = smooth(lin(t, 0.3, 2.6)), cx = W / 2, cy = 150;
+    streaks(c, 3, 46, 7, t, k, cx, cy, a * (1 - 0.8 * smooth(lin(t, 10, 13))));
+    streaks(c, 4, 20, 2.5, t * 1.4, k, cx, cy, a * (1 - smooth(lin(t, 9, 11.5))));
+    const p = smooth(lin(t, 8.2, 9)), f = lamp(t);
+    glow(c, cx, cy, 40 + 50 * f, '255,190,110', p * (0.3 + 0.7 * f)); glow(c, cx, cy, 6 + 8 * f, '255,240,220', p * (0.55 + 0.45 * f));
+    title(c, t, 10.6, 268, 46, 1 - smooth(lin(t, 13.6, 14.6)));
+    vignette(c, 0.75); } },
+  // The rock: her world. The beam sweeps the fog and flashes its three.
+  { t0: 13.6, t1: 26.8, fn(c, t) {
+    const u = lin(t, 13.6, 26.8), f = lamp(t); c.save(); cam(c, 470, 200, 1 + 0.07 * u);
+    sky(c, '#060a12', '#1a2433', 230); stars(c, 11, 50, 160, 0.35, t); sea(c, 230, 12, t); fog(c, 13, 18, 170, 250, 0.16, 14, t, 4);
+    const [lx, ly] = lighthouse(c, 470, 248, 150, 0.45 + 0.55 * f); rock(c, 470, 252, 90, 14);
+    const ang = PI * 1.04 + 0.11 * Math.sin((t - 14) * 0.32);
+    beam(c, lx, ly, ang, 520, 0.07, 0.2 + 0.5 * f, 6); beam(c, lx, ly, ang, 420, 0.02, 0.2 + 0.5 * f, 1.5);
+    fog(c, 15, 14, 210, 320, 0.13, 18, t, 7); c.restore(); vignette(c); } },
+  // The glass: the lens turns; her hand winds the clockwork.
+  { t0: 26, t1: 40.2, fn(c, t) {
+    const u = lin(t, 26, 40.2), f = lamp(t); c.save(); cam(c, W / 2, H / 2, 1 + 0.06 * u);
+    lens(c, W / 2, H / 2, 160, i => 0.52 + 0.1 * Math.sin(t * 1.1 + i) + 0.4 * f, 0, t, 17);
+    const a = t * 2.1, kx = 548 + Math.cos(a) * 16, ky = 300 + Math.sin(a) * 16;   // crank and the winding hand
+    c.strokeStyle = 'rgba(160,120,60,.6)'; c.lineWidth = 3; c.beginPath(); c.arc(548, 300, 16, 0, TAU); c.stroke();
+    c.strokeStyle = 'rgba(190,150,80,.8)'; c.beginPath(); c.moveTo(548, 300); c.lineTo(kx, ky); c.stroke();
+    c.fillStyle = '#000'; c.beginPath(); c.ellipse(kx + 8, ky + 8, 15, 11, -0.5, 0, TAU); c.fill();
+    c.beginPath(); c.moveTo(kx - 4, ky + 12); c.lineTo(kx + 20, ky - 2); c.lineTo(W + 60, H - 20); c.lineTo(W + 60, H + 60); c.lineTo(W - 70, H + 60); c.fill();
+    c.restore(); vignette(c, 0.7); } },
+  // Someone out there: a lantern in the fog that will not come into focus.
+  { t0: 39.4, t1: 58.8, fn(c, t) {
+    const u = lin(t, 39.4, 58.8), f = lamp(t); c.save(); cam(c, 170, 250, 1 + 0.1 * u);
+    sky(c, '#070b12', '#1b2330', 220); sea(c, 220, 23, t, { swell: 0.15 * u }); fog(c, 24, 26, 150, 300, 0.2, 16, t, 6 + 6 * u);
+    const focus = 3.6 - 1.9 * smooth(lin(t, 48.6, 51.4)) + 2.6 * smooth(lin(t, 52, 55));   // the rack focus tries, and fails
+    boat(c, 170 + Math.sin(t * 0.4) * 3, 252 + Math.sin(t * 1.1) * 2.2, 1.05, focus, 0.8 + 0.15 * Math.sin(t * 2.3), Math.sin(t * 1.1 + 1) * 0.05);
+    beam(c, 700, 150, PI * 0.97 - 0.07 + 0.1 * lin(t, 50, 58), 420, 0.05, 0.05 + 0.2 * f, 8);
+    fog(c, 25, 16, 200, 330, 0.18 + 0.08 * u, 20, t, 9 + 8 * u); c.restore(); vignette(c); } },
+  // Storm: the streaming blur again, now hostile. The beam stutters and dies.
+  { t0: 58, t1: 72, fn(c, t) {
+    const k = lin(t, 58, 70), r = rng(Math.floor(t * 11) + 900), fail = lin(t, 62, 71.6);
+    const flick = r() < fail * 0.75 ? 0.15 + r() * 0.3 : 1, lit = (0.55 - 0.25 * k + 0.45 * lamp(t) * (1 - fail * 0.6)) * flick * (1 - smooth(lin(t, 71.5, 71.95)));
+    c.save(); cam(c, 480, 200, 1.03, Math.sin(t * 7.3) * 2.2 * k, Math.sin(t * 9.1 + 1) * 1.6 * k);
+    sky(c, '#040609', '#10161f', 210); sea(c, 210, 29, t, { col: '#020306', waves: 120, wa: 0.22, swell: 0.3 + 0.7 * k });
+    for (let i = 0; i < 3; i++) { const base = 262 + i * 30 - k * 14, amp = (6 + i * 5) * (0.4 + k);   // swells climbing the rock
+      c.fillStyle = ['#070b12', '#04070c', '#020306'][i]; c.beginPath(); c.moveTo(-40, H + 40);
+      for (let x = -40; x <= W + 40; x += 16) c.lineTo(x, base + Math.sin(x * 0.011 * (1 + i * 0.3) + t * (1.3 + i * 0.4) + i * 2) * amp + Math.sin(x * 0.03 + t * 2.1) * amp * 0.25);
+      c.lineTo(W + 40, H + 40); c.fill(); if (i === 0) { const [lx, ly] = lighthouse(c, 480, 236, 140, lit); rock(c, 480, 240, 90, 30); beam(c, lx, ly, PI * 1.1 + 0.08 * Math.sin(t * 0.5), 260, 0.04, lit * 0.5, 5); } }
+    rain(c, 31, Math.round(60 + 240 * k), 1.9, 0.2 + 0.4 * k, 34, t); fog(c, 32, 10, 200, 340, 0.08, 22, t, 30);
+    c.restore(); vignette(c, 0.8); } },
+  // Out: four seconds of true black, then only rain.
+  { t0: 72, t1: 84, fn(c, t) { c.fillStyle = '#000'; c.fillRect(0, 0, W, H); rain(c, 33, 90, 1.95, 0.085 * smooth(lin(t, BLACK[1], BLACK[1] + 2.5)), 30, t, 420); } },
+  // One match, then the glass gathers it: ring by ring, until one beam bursts out.
+  { t0: 84, t1: 112, fn(c, t) {
+    const u = lin(t, 84, 112), cx = W / 2, cy = H / 2; c.save(); cam(c, cx, cy, 1 + 0.1 * smooth(u));
+    const strike = Math.exp(-(t - 84) / 0.22), seat = smoother(lin(t, 85.2, 87.4)), set = smoother(lin(t, 97.6, 99.6));
+    const fx = mix(cx + 46, cx, seat), fy = mix(cy + 78, cy + 8, seat) - 8 * set + 4 * set;
+    const ring = i => smoother(lin(t, RING0 + (i - 1) * RING_STEP, RING0 + (i - 1) * RING_STEP + 0.8));
+    const burst = smooth(lin(t, 108, 110)), total = lens(c, cx, cy, 160, i => ring(i) * (0.85 + 0.15 * lamp(t)), burst, t, 41, set);
+    glow(c, fx, fy, 300, '255,200,140', 0.9 * strike);
+    smoke(c, fx, fy, smooth(lin(t, 85.6, 92)) * (1 - 0.7 * set), t); flame(c, fx, fy, 1.25 * (0.85 + 0.15 * seat), t, 1 - 0.5 * burst);
+    if (burst > 0) { blurred(c, 4, s => { s.lineWidth = 10; for (let i = 0; i < 7; i++) { s.strokeStyle = `hsla(${i * 45},90%,65%,${0.22 * burst})`; s.beginPath(); s.arc(cx, cy, 172 + i * 7 + 30 * lin(t, 108, 112), 0, TAU); s.stroke(); } }, 'lighter');
+      glow(c, cx, cy, 220 + 260 * burst, '255,240,215', 0.7 * burst); }
+    c.restore(); vignette(c, mix(0.78, 0.5, total));
+    const white = smooth(lin(t, 110.4, 111.9)); if (white > 0) { c.fillStyle = `rgba(255,246,228,${white})`; c.fillRect(0, 0, W, H); } } },
+  // Ride the beam: the camera leaves with the light, through fog that tears open ahead.
+  { t0: 112, t1: 128.4, fn(c, t) {
+    c.fillStyle = '#03050a'; c.fillRect(0, 0, W, H); const cx = W / 2, cy = H * 0.47, f = lamp(t);
+    const phase = x => 15 * smoother(lin(x, 111, 128.6)), ph = phase(t), vel = (phase(t + 0.03) - phase(t - 0.03)) / 0.06;
+    blurred(c, 1.6, s => { const r = rng(43); s.lineCap = 'round';
+      for (let i = 0; i < 170; i++) { const a = r() * TAU, off = r(), warm = r() < 0.25, al = 0.12 + r() * 0.35, lw = 0.8 + r() * 2.4, sp = 0.6 + r() * 0.8;
+        const d = (off + ph * sp) % 1, d0 = 14 + d * d * 420, len = (6 + vel * 110 * d) * sp, e = Math.min(1, d * 5) * (1 - d * 0.4);
+        s.strokeStyle = `rgba(${warm ? '255,200,140' : '215,225,245'},${al * e})`; s.lineWidth = lw * (0.4 + d);
+        s.beginPath(); s.moveTo(cx + Math.cos(a) * d0, cy + Math.sin(a) * d0 * 0.6); s.lineTo(cx + Math.cos(a) * (d0 + len), cy + Math.sin(a) * (d0 + len) * 0.6); s.stroke(); } }, 'lighter');
+    blurred(c, 18, s => { const r = rng(44); for (let i = 0; i < 12; i++) { const a = r() * TAU, off = r(), d = (off + ph * 0.5) % 1, dist = 30 + d * 380;
+      s.fillStyle = `rgba(220,212,196,${0.1 * (1 - d) * Math.min(1, d * 6)})`; s.beginPath(); s.ellipse(cx + Math.cos(a) * dist, cy + Math.sin(a) * dist * 0.6, 60 + d * 160, 16 + d * 40, a, 0, TAU); s.fill(); } });
+    glow(c, cx, cy, 90 + 50 * f + 40 * lin(t, 124, 128.4), '255,245,225', 0.7 + 0.3 * f); vignette(c, 0.7);
+    const white = 1 - smooth(lin(t, 112, 113.6)); if (white > 0) { c.fillStyle = `rgba(255,246,228,${white})`; c.fillRect(0, 0, W, H); } } },
+  // Focus: the beam finds the boat. The only perfect focus in the film.
+  { t0: 127.4, t1: 140.6, focus: t => 8 * (1 - smoother(lin(t, 128.2, 131.2))), fn(c, t) {
+    const u = lin(t, 127.4, 140.6), f = lamp(t), turn = smoother(lin(t, 133.5, 140.6)); c.save(); cam(c, 225, 250, 1 + 0.06 * u);
+    sky(c, '#0a1019', '#26303d', 220); stars(c, 47, 40, 140, 0.3, t); sea(c, 220, 48, t); fog(c, 49, 8, 150, 230, 0.1, 22, t, 5);
+    beam(c, 700, 120, PI * 0.83, 620, 0.055, 0.35 + 0.3 * f, 5); beam(c, 700, 120, PI * 0.83, 620, 0.015, 0.3 + 0.25 * f, 1.5);
+    const bx = 222 + 34 * turn, by = 258 + Math.sin(t * 1.1) * 1.8; glow(c, bx, by - 8, 120, '255,246,226', 0.25 + 0.2 * f);
+    boat(c, bx, by, 1.7, 0, 1, Math.sin(t * 1.1 + 1) * 0.03 - 0.04 * turn); c.restore(); vignette(c, 0.55); } },
+  // The answer: the lantern lifts and blinks her three flashes back. Then the camera begins to rise.
+  { t0: 140, t1: 155.4, fn(c, t) {
+    const rise = smoother(lin(t, 152, 155.6)); c.save(); cam(c, W / 2, 230, 1 - 0.12 * rise, 0, 110 * rise);
+    sky(c, '#0a0f17', '#212b38', 225); c.fillStyle = '#0a0f17'; c.fillRect(-60, -200, W + 120, 200); stars(c, 53, 60, 150, 0.4 + 0.5 * rise, t); sea(c, 225, 54, t);
+    const [lx, ly] = lighthouse(c, 560, 230, 70, 1); rock(c, 560, 233, 50, 55); beam(c, lx, ly, PI * 1.06, 330, 0.04, 0.25, 5);
+    const lift = 9 * smoother(lin(t, 140.2, 141)) * (1 - smoother(lin(t, 144.6, 146))), bob = Math.sin(t * 1.1) * 1.6, ans = sig(t, ANSWER, ANSWER_OFFS);
+    const [qx, qy] = boat(c, 200, 262 + bob, 1.6, 0, 0.45 + 0.55 * ans, 0, lift);
+    c.save(); c.globalCompositeOperation = 'lighter';
+    for (const o of ANSWER_OFFS) { const age = t - ANSWER[0] - o; if (age > 0 && age < 1.6) { const k = age / 1.6; c.strokeStyle = `rgba(255,236,200,${0.6 * (1 - k)})`; c.lineWidth = 1.4 * (1 - k * 0.6); c.beginPath(); c.arc(qx, qy, 8 + 62 * Math.sqrt(k), 0, TAU); c.stroke(); } }
+    c.restore(); glow(c, qx, qy, 60, '255,236,200', 0.5 * ans);
+    fog(c, 56, 8, 200, 300, 0.07 * (1 - rise), 20, t, 5); c.restore(); vignette(c, 0.6); } },
+  // One of many: the coast becomes the curve of a night-side Earth; one light blinks three times.
+  { t0: 152, t1: D + 1, fn(c, t) {
+    c.fillStyle = '#010205'; c.fillRect(0, 0, W, H); stars(c, 59, 260, H, 0.9, t);
+    const up = smoother(lin(t, 152, 160)), R = H * 1.72, cy = mix(H * 2.95, H * 2.25, up), f = sig(t, LAST);
+    c.save(); c.beginPath(); c.arc(W / 2, cy, R, 0, TAU); c.fillStyle = '#03060c'; c.fill(); c.clip();
+    const r = rng(60), lights = smooth(lin(t, 153, 158));
+    for (let i = 0; i < 520; i++) { const tt = r(), depth = Math.pow(r(), 0.7), keep = r(), gg = 180 + r() * 50 | 0, al = 0.25 + r() * 0.6, ph = r() * TAU;
+      if (keep >= (Math.sin(tt * 19) + 1) / 2 * 0.9) continue; const ang = -PI / 2 + (tt - 0.5) * 1.05, d = R - depth * 120;
+      c.fillStyle = `rgba(255,${gg},110,${al * lights * (0.8 + 0.2 * Math.sin(t * 1.7 + ph))})`; c.fillRect(W / 2 + Math.cos(ang) * d, cy + Math.sin(ang) * d, 1.1, 1.1); }
+    c.restore();
+    blurred(c, 2, s => { s.strokeStyle = 'rgba(120,170,255,.55)'; s.lineWidth = 3; s.beginPath(); s.arc(W / 2, cy, R + 1, PI * 1.2, PI * 1.8); s.stroke(); });
+    const la = -PI / 2 + 0.11, hx = W / 2 + Math.cos(la) * (R - 24), hy = cy + Math.sin(la) * (R - 24);   // hers
+    glow(c, hx, hy, 10 + 22 * f, '255,215,160', lights * (0.45 + 0.55 * f)); c.fillStyle = `rgba(255,236,200,${lights})`; c.fillRect(hx - 0.8, hy - 0.8, 1.6, 1.6);
+    title(c, t, 158.6, 108, 40, 0.95); vignette(c, 0.5); } },
+];
+
+// ------------------------------------------------------------------ captions + slate
+let cues = { lines: [] }, voiceBytes = null;
+function captions(c, t) {
+  for (const l of cues.lines) {
+    const out = l.end + 1.2; if (t < l.start - 0.2 || t > out) continue;
+    const font = '350 13.5px Geist'; c.save(); c.font = font; const gap = c.measureText(' ').width;
+    const words = l.text.split(' ').map(s => ({ s, w: c.measureText(s).width + gap })); c.restore();
+    const total = words.reduce((a, w) => a + w.w, 0) - gap, stagger = (l.end - l.start) * 0.82 / words.length;
+    resolveText(c, words, W / 2 - total / 2, 326, font, t, l.start - 0.1, stagger, 0.55, 0.92 * (1 - smooth(lin(t, out - 0.7, out))));
+  }
+}
+const tc = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+function slate(c, t) {
+  if (t >= BLACK[0] && t < BLACK[1]) return;      // the black stays black
+  let b = BEATS[0]; for (const x of BEATS) if (t >= x[0]) b = x;
+  c.save(); c.font = '500 7px Geist'; c.textBaseline = 'top'; c.fillStyle = 'rgba(232,226,212,.36)';
+  c.fillText(`ANIMATIC  ·  ${b[1].toUpperCase()}  ·  ${b[2].toUpperCase()}`, 14, 12);
+  c.textAlign = 'right'; c.fillText(`${tc(t)} / ${tc(D)}`, W - 14, 12); c.restore();
+}
+
+// ------------------------------------------------------------------ frame
+function reset(L) { const c = L.c; c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.filter = 'none'; c.fillStyle = '#000'; c.fillRect(0, 0, W * S, H * S); c.setTransform(S, 0, 0, S, 0, 0); }
+const ready = (async () => {
+  const get = async url => { const res = await fetch(url); if (!res.ok) throw new Error(`Missing asset ${url}`); return res.arrayBuffer(); };
+  [voiceBytes, cues] = await Promise.all([get('voice/keeper.flac'), get('voice/keeper.cues.json').then(b => JSON.parse(new TextDecoder().decode(b)))]);
+  if (cues.sampleRate !== 48000 || Math.abs(cues.duration - D) > 1e-6) throw new Error('Voice cues do not match the film');
+  for (const font of ['250 46px Geist', '350 13.5px Geist', '500 7px Geist']) await document.fonts.load(font);
+  await document.fonts.ready;
+})();
+async function renderFrame(t) {
+  await ready; t = Number.isFinite(t) ? clamp(t, 0, D) : 0;
+  const m = MAIN.c; reset(MAIN);
+  const on = SCENES.filter(s => t >= s.t0 && t < s.t1);
+  on.forEach((s, i) => {
+    const L = i ? LB : LA; reset(L); L.c.save(); s.fn(L.c, t); L.c.restore();
+    const blur = s.focus ? s.focus(t) : 0;
+    m.save(); m.setTransform(1, 0, 0, 1, 0, 0); m.globalAlpha = i ? smooth((t - s.t0) / (on[0].t1 - s.t0)) : 1;
+    m.filter = blur > 0.05 ? `blur(${(blur * S).toFixed(2)}px)` : 'none'; m.drawImage(L.cv, 0, 0); m.restore();
+  });
+  const end = smooth(lin(t, 162.6, 164.5)); if (end > 0) { m.fillStyle = `rgba(0,0,0,${end})`; m.fillRect(0, 0, W, H); }
+  captions(m, t); slate(m, t);
+}
+
+// ------------------------------------------------------------------ scratch score
+// One theme only: the light's three flashes as three rising glass bells (D, F sharp, A), unanswered through
+// Act I, cut dead at the blackout, rebuilt one note per lens ring, and answered an octave up by the boat.
+const hz = n => 440 * Math.pow(2, (n - 69) / 12);
+const GLASS = [[1, 1, 1.5], [2.76, 0.35, 0.7], [5.4, 0.14, 0.35], [8.93, 0.06, 0.18]];
+async function score(M, FX) {
+  const room = M.reverb(6, 11, { decay: 4.8, dark: 0.6 }, 0.5), fxRoom = FX.reverb(3, 23, { decay: 2.2, dark: 0.5 }, 0.35);
+  const sec = (notes, t0, t1, amp, cutoff, rise = 3, fall = 3) => M.pad({ notes: notes.map(hz), amp, send: room, sendAmt: 0.7, voices: 3, detune: 6, env: [[t0, 0], [t0 + rise, 1], [t1 - fall, 1], [t1, 0]], cutoff });
+  const swell = (t0, t1, lo, hi, step = 3.7) => { const p = [[t0, 0]]; let i = 0; for (let t = t0 + 2.5; t < t1 - 2.5; t += step, i++) p.push([t, i % 2 ? lo : hi]); p.push([t1, 0]); return p; };
+  // pads: open fifths (no third) while the light goes unanswered; D major once the glass gathers the flame
+  sec([38, 45, 50, 57], 2.5, 58.5, 0.06, [[2.5, 240], [14, 520], [40, 420], [58.5, 320]], 5);
+  sec([38, 39, 45, 50], 57, BLACK[0] + 0.12, 0.07, [[57, 260], [70, 620], [72, 400]], 4, 0.12);        // storm; cut dead
+  sec([38, 45, 54, 57, 62], RING0 - 1, 114, 0.055, [[99, 260], [108, 1500], [114, 800]], 8, 3);
+  sec([50, 57, 62, 66], 111, 128.6, 0.05, [[111, 500], [124, 2400], [128.6, 500]], 4, 1.2);            // the pad lifts
+  sec([69], 127.6, 142.5, 0.035, [[127.6, 700], [142.5, 900]], 0.9, 2.5);                              // one sustained tone
+  sec([38, 45, 50, 54, 57, 66], 150.5, 164.6, 0.07, [[150.5, 400], [156, 1500], [164.6, 500]], 3.5, 4.5);
+  // the theme
+  const motif = (t, notes, amp, pan, offs = [0, 1.1, 2.2], detune = 0, amps = [1, 1, 1]) => notes.forEach((n, i) =>
+    M.bell({ t: t + offs[i], f: hz(n) * Math.pow(2, detune * (i + 1) / 1200), amp: amp * amps[i], pan, partials: GLASS, send: room, sendAmt: 0.9 }));
+  const TH = [62, 66, 69];
+  motif(9, TH, 0.07, 0); motif(22, TH, 0.035, 0.25); motif(37, TH, 0.04, 0);
+  motif(52, TH, 0.032, 0.5, undefined, -22);                         // detuned: it is not reaching
+  motif(66, TH, 0.03, 0.2, undefined, -30, [1, 0.6, 0.15]);          // the third flash fails
+  motif(106, TH, 0.06, 0); motif(120, TH, 0.06, 0); motif(134, TH, 0.055, 0.3);
+  motif(ANSWER[0], TH.map(n => n + 12), 0.045, -0.45, ANSWER_OFFS);  // the first answer
+  motif(LAST[0], TH, 0.04, 0.1);
+  [50, 54, 57, 62, 66, 69, 74, 78, 81].forEach((n, i) => M.bell({ t: RING0 + i * RING_STEP, f: hz(n), amp: 0.028 + i * 0.004, pan: Math.sin(i * 1.9) * 0.4, partials: GLASS, send: room, sendAmt: 0.9 }));
+  [[161.2, 74, 0.04], [162.1, 69, 0.035], [163.0, 62, 0.04]].forEach(([t, n, a]) => M.bell({ t, f: hz(n), amp: a, pan: 0, partials: GLASS, send: room, sendAmt: 0.9 }));
+  // ---- bed
+  FX.noise({ t0: 0.3, t1: BLACK[0] + 0.1, seed: 3, color: 'brown', type: 'lowpass', freq: [[0.3, 420], [58, 520], [70, 900]], q: 0.6, gain: [...swell(0.3, 56, 0.2, 0.36), [58, 0.4], [66, 0.75], [BLACK[0], 0.8], [BLACK[0] + 0.1, 0]].sort((a, b) => a[0] - b[0]), pan: [[0.3, -0.2], [36, 0.2], [72, -0.1]] });
+  FX.noise({ t0: 12, t1: BLACK[0] + 0.1, seed: 5, color: 'pink', type: 'bandpass', freq: [[12, 420], [30, 620], [40, 500], [58, 800], [66, 1300], [72, 900]], q: 1.4, gain: [[12, 0], [18, 0.07], [38, 0.06], [50, 0.16], [60, 0.3], [70, 0.42], [BLACK[0], 0.4], [BLACK[0] + 0.1, 0]], pan: [[12, 0.4], [40, -0.4], [72, 0.3]] });
+  // rain: arrives with the storm, is all there is in the black, thins as the flame takes
+  FX.noise({ t0: 57, t1: 108, seed: 7, color: 'white', type: 'highpass', freq: [[57, 5200], [72, 3800], [72.2, 5600], [108, 6500]], q: 0.5, gain: [[57, 0], [66, 0.24], [BLACK[0], 0.3], [BLACK[0] + 0.15, 0.1], [84, 0.1], [98, 0.045], [108, 0]] });
+  [[61.6, 0.7], [68.2, 0.9]].forEach(([t, a], i) => FX.noise({ t0: t, t1: t + 4, seed: 11 + i, color: 'brown', type: 'lowpass', freq: [[t, 160], [t + 4, 50]], q: 0.7, gain: [[t, 0], [t + 0.25, a], [t + 4, 0]], send: fxRoom, sendAmt: 0.6 }));
+  // clockwork: the lens mechanism ticks, drags in the storm, and stops with the lamp
+  const tick = (t, amp) => FX.bell({ t, f: 2300, amp, pan: 0.15, partials: [[1, 1, 0.012], [1.52, 0.5, 0.008], [0.31, 0.6, 0.02]], attack: 0.001, send: fxRoom, sendAmt: 0.3, dur: 0.12 });
+  for (let t = 14.5; t < 26; t += 0.5) tick(t, 0.012);
+  for (let t = 26; t < 40; t += 0.5) tick(t, 0.045);
+  for (let t = 40; t < 58; t += 0.5) tick(t, 0.012 * (1 - lin(t, 40, 46) * 0.6));
+  for (let t = 58, step = 0.5; t < BLACK[0] - 0.3; t += step, step *= 1.09) tick(t, 0.03);
+  for (let t = 109; t < 127; t += 0.5) tick(t, 0.014);
+  // the lamp dies: one dull stop, then nothing but rain
+  FX.bell({ t: BLACK[0] - 0.04, f: 62, amp: 0.3, partials: [[1, 1, 0.16], [2.4, 0.4, 0.07]], attack: 0.002, dur: 0.9 });
+  // one match
+  FX.noise({ t0: 83.98, t1: 84.5, seed: 17, color: 'white', type: 'highpass', freq: [[83.98, 2600], [84.3, 6500]], q: 0.7, gain: [[83.98, 0], [84.0, 0.5], [84.09, 0.28], [84.5, 0]], send: fxRoom, sendAmt: 0.5 });
+  FX.noise({ t0: 84.2, t1: 112, seed: 19, color: 'pink', type: 'bandpass', freq: [[84.2, 260], [112, 420]], q: 0.5, gain: [[84.2, 0], [85, 0.07], [88, 0.045], [91, 0.065], [95, 0.04], [99, 0.06], [108, 0.09], [112, 0]] });
+  // the burst and the ride: a long rising whoosh
+  FX.noise({ t0: 107.5, t1: 129, seed: 23, color: 'pink', type: 'bandpass', freq: [[107.5, 240], [112, 900], [124, 3200], [129, 900]], q: 0.8, gain: [[107.5, 0], [111.6, 0.3], [113.5, 0.22], [123, 0.42], [128.4, 0.05], [129, 0]], pan: [[107.5, 0], [118, -0.3], [126, 0.3]], send: room, sendAmt: 0.4 });
+  // the sea returns
+  FX.noise({ t0: 128, t1: D - 0.1, seed: 29, color: 'brown', type: 'lowpass', freq: [[128, 420], [D - 0.1, 380]], q: 0.6, gain: [...swell(128, 160, 0.14, 0.26), [D - 0.1, 0]], pan: [[128, 0.2], [D - 0.1, -0.2]] });
+}
+async function mixdown(sampleRate) {
+  await ready;
+  const ctx = new OfflineAudioContext(2, Math.ceil(D * sampleRate), sampleRate);
+  const voiceBuf = await ctx.decodeAudioData(voiceBytes.slice(0));
+  await K.deterministicGraph(ctx, async () => {
+    const music = ctx.createGain(), fx = ctx.createGain(), voice = ctx.createGain();
+    music.connect(ctx.destination); fx.connect(ctx.destination); voice.connect(ctx.destination);
+    const C = K.studio(ctx, D, ctx.createGain());
+    C.curve(music.gain, Reel.duckPoints(cues.lines, D, { depthDb: -8 })); C.curve(fx.gain, Reel.duckPoints(cues.lines, D, { depthDb: -5 }));
+    const M = K.studio(ctx, D, music), FX = K.studio(ctx, D, fx), V = K.studio(ctx, D, voice);
+    const src = ctx.createBufferSource(); src.buffer = voiceBuf;
+    const g = ctx.createGain(), room = V.reverb(1.6, 977, { decay: 1.1, dark: 0.7 }, 0.1), centre = ctx.createStereoPanner();
+    src.connect(g); g.connect(centre); centre.connect(V.master); g.connect(room); src.start(0);
+    await score(M, FX);
+  });
+  return K.finalize(await ctx.startRendering(), -18, -1.7, D);
+}
+
+window.motion = { width: W * S, height: H * S, duration: D, fps: 30, poster: 131.5 };
+window.renderFrame = renderFrame;
+window.renderAudio = async ({ sampleRate = 48000 } = {}) => mixdown(sampleRate);
+
+// Browser preview: real time, frames may drop. Click to play with sound from the start; click again to stop.
+if (!RENDER) {
+  let audio = null, t0 = performance.now(), busy = false;
+  document.body.style.cursor = 'pointer'; document.body.title = 'Click to play with sound';
+  document.addEventListener('click', async () => {
+    if (audio) { audio.ac.close(); audio = null; t0 = performance.now(); return; }
+    const ac = new AudioContext(), buf = await window.renderAudio({ sampleRate: ac.sampleRate });
+    const src = ac.createBufferSource(); src.buffer = buf; src.connect(ac.destination);
+    const start = ac.currentTime + 0.05; src.start(start); src.loop = true; audio = { ac, start };
+  });
+  const loop = async () => {
+    if (!busy) { busy = true; const t = audio ? ((audio.ac.currentTime - audio.start) % D + D) % D : ((performance.now() - t0) / 1000) % D;
+      try { await renderFrame(t); } finally { busy = false; } }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+</script>
+</body></html>
