@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "name": "test",
+      "run": "npm ci --ignore-scripts --no-audit --no-fund && npm run check && npm test",
+      "timeout": 900
+    }
+  ],
+  "notes": "Browser, gallery, storyboard and Docker steps from the old CI are not run here."
+}
